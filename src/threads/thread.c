@@ -28,6 +28,10 @@ static struct list ready_list;
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
 
+/* List of processes in THREAD_BLOCKED state because it is currently sleeping, that is, processes
+   that are blocked and cannot run because they are waiting to be woken up. */
+static struct list sleep_list;
+
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -92,6 +96,7 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
+  list_init (&sleep_list);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -219,6 +224,73 @@ thread_block (void)
   thread_current ()->status = THREAD_BLOCKED;
   schedule ();
 }
+
+void
+thread_sleep (int64_t wakeup_tick) {
+
+  enum intr_level old_level;
+
+  struct thread *cur_thread = thread_current ();
+  ASSERT (is_thread (cur_thread));
+
+  old_level = intr_disable ();
+  ASSERT (t->status == THREAD_RUNNING);
+  cur_thread->wakeup_tick = wakeup_tick;
+  list_insert_ordered (&sleep_list, &cur_thread->elem,
+                     wakeup_tick_less, NULL);
+  intr_set_level (old_level);
+
+  thread_block();
+}
+
+
+/*Returns true if A is less than B, or
+   false if A is greater than or equal to B. */
+bool 
+wakeup_tick_less (const struct list_elem *a, const struct list_elem *b, 
+                  void *aux)
+{
+  struct thread *a = list_entry (a, struct thread, elem);
+  struct thread *b = list_entry (b, struct thread, elem);
+  if (a->wakeup_tick < b->wakeup_tick)
+    return true;
+  else
+    {
+      return false;
+    }
+}
+
+void
+wakeup_threads (void) {
+  while (!list_empty(&sleep_list)) {
+
+
+    enum intr_level old_level;
+
+    old_level = intr_disable ();
+
+
+    struct thread *t = list_entry(list_head(&sleep_list),struct thread, elem);
+    ASSERT (is_thread (t));
+    ASSERT (t->status == THREAD_BLOCKED);
+
+    int64_t cur_tick = timer_ticks()
+
+    if (t->wakeup_tick > cur_tick){
+      break;
+    }
+
+    struct thread *woken_up_thread = list_entry(list_pop_front (&sleep_list),
+                                                struct thread, elem);
+    thread_unblock (woken_up_thread);
+
+
+    intr_set_level (old_level);
+
+  }
+
+}
+
 
 /* Transitions a blocked thread T to the ready-to-run state.
    This is an error if T is not blocked.  (Use thread_yield() to
