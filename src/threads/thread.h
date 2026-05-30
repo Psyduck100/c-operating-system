@@ -120,7 +120,12 @@ typedef void thread_func (void *aux);
 tid_t thread_create (const char *name, int priority, thread_func *, void *);
 
 void thread_block (void);
+void thread_sleep (int64_t);
+bool wakeup_tick_less (const struct list_elem *, const struct list_elem *,
+                       void *aux);
+
 void thread_unblock (struct thread *);
+void wakeup_threads (void);
 
 struct thread *thread_current (void);
 tid_t thread_tid (void);

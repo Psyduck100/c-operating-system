@@ -234,13 +234,13 @@ thread_sleep (int64_t wakeup_tick) {
   ASSERT (is_thread (cur_thread));
 
   old_level = intr_disable ();
-  ASSERT (t->status == THREAD_RUNNING);
+  ASSERT (cur_thread->status == THREAD_RUNNING);
   cur_thread->wakeup_tick = wakeup_tick;
   list_insert_ordered (&sleep_list, &cur_thread->elem,
                      wakeup_tick_less, NULL);
+  thread_block();
   intr_set_level (old_level);
 
-  thread_block();
 }
 
 
@@ -250,9 +250,9 @@ bool
 wakeup_tick_less (const struct list_elem *a, const struct list_elem *b, 
                   void *aux)
 {
-  struct thread *a = list_entry (a, struct thread, elem);
-  struct thread *b = list_entry (b, struct thread, elem);
-  if (a->wakeup_tick < b->wakeup_tick)
+  struct thread *ta = list_entry (a, struct thread, elem);
+  struct thread *tb = list_entry (b, struct thread, elem);
+  if (ta->wakeup_tick < tb->wakeup_tick)
     return true;
   else
     {
@@ -262,7 +262,7 @@ wakeup_tick_less (const struct list_elem *a, const struct list_elem *b,
 
 void
 wakeup_threads (void) {
-  while (!list_empty(&sleep_list)) {
+  while (!list_empty (&sleep_list)) {
 
 
     enum intr_level old_level;
@@ -270,11 +270,11 @@ wakeup_threads (void) {
     old_level = intr_disable ();
 
 
-    struct thread *t = list_entry(list_head(&sleep_list),struct thread, elem);
+    struct thread *t = list_entry(list_front (&sleep_list),struct thread, elem);
     ASSERT (is_thread (t));
     ASSERT (t->status == THREAD_BLOCKED);
 
-    int64_t cur_tick = timer_ticks()
+    int64_t cur_tick = timer_ticks();
 
     if (t->wakeup_tick > cur_tick){
       break;
