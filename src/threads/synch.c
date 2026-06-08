@@ -236,6 +236,7 @@ lock_acquire (struct lock *lock)
            cur_donor->priority > lock_holder->priority){
         
       lock_holder->priority = cur_donor->priority;
+      
 
       /*check if the lock holder is also waiting on a lock*/
       if (lock_holder->waiting_lock == NULL){
@@ -243,10 +244,17 @@ lock_acquire (struct lock *lock)
         break;
       }
 
-      
+      /*here lock_holder's priority changed and it is also waiting for
+      a lock. So it is also a donor. As such we need to update the
+      donors list of the thread which has the lock that lock_holder is 
+      waiting on*/
+      struct thread *next_holder = lock_holder->waiting_lock->holder;
+      list_remove(&lock_holder->donor_elem);
+      list_insert_ordered(&next_holder->donations_list, &lock_holder->donor_elem,
+                          thread_priority_more_donor, NULL);
 
       /*if lock holder is waiting on a lock then continue donations*/
-      lock_holder = lock_holder->waiting_lock->holder;
+      lock_holder = next_holder;
     }
 
     /*last lock_holder may be in ready list and if so update the ready list*/
