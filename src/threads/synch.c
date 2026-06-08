@@ -112,23 +112,27 @@ sema_up (struct semaphore *sema)
   enum intr_level old_level;
 
   ASSERT (sema != NULL);
-  struct thread *unblocked = NULL;
 
   old_level = intr_disable ();
+
   if (!list_empty (&sema->waiters)) {
   // Sort waiter list before unblocking threads in case of priority donation
     list_sort(&sema->waiters, thread_priority_more, NULL); 
-    unblocked = list_entry (list_pop_front (&sema->waiters),
-                            struct thread, elem);
-    thread_unblock (unblocked);       
+    thread_unblock (list_entry (list_pop_front (&sema->waiters),
+                                struct thread, elem));       
   }
-    
   sema->value++;
-  intr_set_level (old_level);
   
-  check_possible_preemption(unblocked);
-  
+  /*get highest priority thread from list (since list is sorted
+  highest prioirty is front element)*/
+  struct thread *highest_prio_t = get_highest_prio_ready_thread();
 
+  if (highest_prio_t != NULL){
+    /*check if new priority is less than a ready threads and if so yield*/
+    check_possible_preemption(highest_prio_t);
+  }
+  
+  intr_set_level (old_level);
 }
 
 static void sema_test_helper (void *sema_);
@@ -239,6 +243,8 @@ lock_acquire (struct lock *lock)
         break;
       }
 
+      
+
       /*if lock holder is waiting on a lock then continue donations*/
       lock_holder = lock_holder->waiting_lock->holder;
     }
@@ -286,7 +292,6 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
-  lock->holder = NULL;
 
   enum intr_level old_level;
   old_level = intr_disable ();
@@ -294,7 +299,6 @@ lock_release (struct lock *lock)
   // Get the current thread
   struct thread *cur = thread_current ();
 
-  sema_up (&lock->semaphore);
   // 1. Remove all the donations from threads waiting on this lock
 
   // Get the first donor_elem of the current thread
@@ -344,14 +348,8 @@ lock_release (struct lock *lock)
     cur->priority = highest_priority;
   }
 
-  /*get highest priority thread from list (since list is sorted
-  highest prioirty is front element)*/
-  struct thread *highest_prio_t = get_highest_prio_ready_thread();
-
-  if (highest_prio_t != NULL){
-    /*check if new priority is less than a ready threads and if so yield*/
-    check_possible_preemption(highest_prio_t);
-  }
+  lock->holder = NULL;
+  sema_up (&lock->semaphore);
 
   intr_set_level (old_level);
 
@@ -431,7 +429,7 @@ cond_wait (struct condition *cond, struct lock *lock)
   ASSERT (lock_held_by_current_thread (lock));
   
   sema_init (&waiter.semaphore, 0);
-  list_insert_ordered(&cond->waiters, &waiter.elem, sema_priority_more, NULL);
+  list_push_back (&cond->waiters, &waiter.elem);
   lock_release (lock);
   sema_down (&waiter.semaphore);
   lock_acquire (lock);
