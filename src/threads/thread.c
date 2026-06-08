@@ -493,7 +493,7 @@ thread_set_priority (int new_priority)
   // set priority equal to the one new
   if (list_empty (&cur->donations_list) || new_priority > cur->priority){
     cur->priority = new_priority;
-    }
+  }
 
   // Otherwise, set priority to max(top donor's priority, new_priority)
   else {
@@ -503,43 +503,66 @@ thread_set_priority (int new_priority)
     }
   }
 
+  /*get highest priority thread from list (since list is sorted
+  highest prioirty is front element)*/
+  struct thread *highest_prio_t = get_highest_prio_ready_thread();
 
-  if (!list_empty (&ready_list)){
-
-    /*get highest priority thread from list (since list is sorted
-    highest prioirty is front element)*/
-    struct thread *highest_prio_t = list_entry(list_front (&ready_list),
-                                                     struct thread, elem);
-
+  if (highest_prio_t != NULL){
     /*check if new priority is less than a ready threads and if so yield*/
     check_possible_preemption(highest_prio_t);
-
   }
+
+  
 
   intr_set_level (old_level);
    
 }
 
-  /* Updates thread t's priority (which is in then ready list)
-    while keeping the list properly sorted*/
-  void
-  update_priority_in_ready_list(struct thread *t, int new_priority)
-  {
-    enum intr_level old_level;
+/*returns the highest priority thread from the ready list*/
+struct thread *
+get_highest_prio_ready_thread()
+{
+
+  enum intr_level old_level;
 
 
+  old_level = intr_disable ();
+  if (!list_empty (&ready_list)){
 
-    old_level = intr_disable ();
-
-    if (t->status == THREAD_READY){
-      list_remove(&t->elem);
-      t->priority = new_priority;
-      list_insert_ordered (&ready_list, &t->elem, 
-                          thread_priority_more, NULL);
-    }
+    /*gets highest priority thread from list (since list is sorted
+    highest prioirty is front element)*/
+    struct thread *highest_prio_t = list_entry(list_front (&ready_list),
+                                                     struct thread, elem);
 
     intr_set_level (old_level);
+    return highest_prio_t;
   }
+  intr_set_level (old_level);
+  return NULL;
+
+
+}
+
+/* Updates thread t's priority (which is in then ready list)
+  while keeping the list properly sorted*/
+void
+update_priority_in_ready_list(struct thread *t, int new_priority)
+{
+  enum intr_level old_level;
+
+
+
+  old_level = intr_disable ();
+
+  if (t->status == THREAD_READY){
+    list_remove(&t->elem);
+    t->priority = new_priority;
+    list_insert_ordered (&ready_list, &t->elem, 
+                         thread_priority_more, NULL);
+  }
+
+  intr_set_level (old_level);
+}
 
 /* Returns the current thread's priority. */
 int

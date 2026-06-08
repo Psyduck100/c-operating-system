@@ -250,7 +250,6 @@ lock_acquire (struct lock *lock)
 
   sema_down(&lock->semaphore);
   lock->holder = cur_t;
-  thread_current()->waiting_lock = NULL;
 
   intr_set_level (old_level);
 }
@@ -288,7 +287,6 @@ lock_release (struct lock *lock)
   ASSERT (lock_held_by_current_thread (lock));
 
   lock->holder = NULL;
-  sema_up (&lock->semaphore);
 
   enum intr_level old_level;
   old_level = intr_disable ();
@@ -296,6 +294,7 @@ lock_release (struct lock *lock)
   // Get the current thread
   struct thread *cur = thread_current ();
 
+  sema_up (&lock->semaphore);
   // 1. Remove all the donations from threads waiting on this lock
 
   // Get the first donor_elem of the current thread
@@ -310,6 +309,7 @@ lock_release (struct lock *lock)
     // then go to next element
     struct list_elem *next = list_next(cur_donor_elem);
     if (donor->waiting_lock == lock) {
+      donor->waiting_lock = NULL;
       list_remove(cur_donor_elem);
     }
       cur_donor_elem = next;
@@ -317,11 +317,10 @@ lock_release (struct lock *lock)
   
   // 2. Restore the current threads priority to 
   // either the highest remaining donation or the base priority 
-
+  
   // If the donation list is empty, set priority to base priority
   if (list_empty (&cur->donations_list)) {
-    intr_set_level (old_level);
-    thread_set_priority(cur->base_priority);
+    cur->priority = cur->base_priority;
   }
   
   // Otherwise, set priority equal to the highest reaming donor's priority
@@ -338,14 +337,23 @@ lock_release (struct lock *lock)
 
 
     // If the top donor's priority is higher, set priority equal to that
-    if (top_donor->priority > cur->priority) {
+    if (top_donor->priority > highest_priority) {
       highest_priority = top_donor->priority;
     }
 
-    intr_set_level (old_level);
-    thread_set_priority(highest_priority);
+    cur->priority = highest_priority;
   }
 
+  /*get highest priority thread from list (since list is sorted
+  highest prioirty is front element)*/
+  struct thread *highest_prio_t = get_highest_prio_ready_thread();
+
+  if (highest_prio_t != NULL){
+    /*check if new priority is less than a ready threads and if so yield*/
+    check_possible_preemption(highest_prio_t);
+  }
+
+  intr_set_level (old_level);
 
 }
 
