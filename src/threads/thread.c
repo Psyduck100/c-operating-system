@@ -153,6 +153,20 @@ thread_print_stats (void)
           idle_ticks, kernel_ticks, user_ticks);
 }
 
+/* Checks if a threads priority is greater than the current running
+thread and if so yield and rescedudle*/
+void
+check_possible_preemption(struct thread *t)
+{
+  ASSERT (!intr_context ());
+  if (t != NULL) {
+    int cur_thread_priority = thread_get_priority();
+    if (cur_thread_priority < t->priority){
+      thread_yield();
+    }
+  }
+}
+
 /* Creates a new kernel thread named NAME with the given initial
    PRIORITY, which executes FUNCTION passing AUX as the argument,
    and adds it to the ready queue.  Returns the thread identifier
@@ -209,10 +223,7 @@ thread_create (const char *name, int priority,
 
   /* check if new threads priority is greater than the currently
      running thread. If so yield the CPU and reshecudle*/
-  int cur_thread_priority = thread_get_priority();
-  if (cur_thread_priority < t->priority){
-    thread_yield();
-  }
+  check_possible_preemption(t);
 
   return tid;
 }
@@ -320,7 +331,7 @@ wakeup_threads (void) {
 
   while (!list_empty (&sleep_list)) {
 
-    /*gets threads from front of list (list is orderered highest priority first)*/
+    /*gets threads from front of list (list is orderered by wakeup time)*/
     struct thread *t = list_entry(list_front (&sleep_list),struct thread, elem);
     ASSERT (is_thread (t));
     ASSERT (t->status == THREAD_BLOCKED);
@@ -335,6 +346,7 @@ wakeup_threads (void) {
     struct thread *woken_up_thread = list_entry(list_pop_front (&sleep_list),
                                                 struct thread, elem);
     thread_unblock (woken_up_thread);
+
 
 
   }
@@ -365,6 +377,7 @@ thread_unblock (struct thread *t)
                        thread_priority_more, NULL);
   t->status = THREAD_READY;
   intr_set_level (old_level);
+
 }
 
 /* Returns the name of the running thread. */
@@ -468,13 +481,12 @@ thread_set_priority (int new_priority)
   // Get the current thread
   struct thread *cur = thread_current ();
 
-
   enum intr_level old_level;
 
 
   old_level = intr_disable ();
 
-    // Set the base priority to the new one
+  // Set the base priority to the new one
   cur->base_priority = new_priority;
   
   // If there's no donors or the new priority is higher, 
@@ -491,6 +503,7 @@ thread_set_priority (int new_priority)
     }
   }
 
+
   if (!list_empty (&ready_list)){
 
     /*get highest priority thread from list (since list is sorted
@@ -499,13 +512,34 @@ thread_set_priority (int new_priority)
                                                      struct thread, elem);
 
     /*check if new priority is less than a ready threads and if so yield*/
-    if (new_priority < highest_prio_t->priority){
-      thread_yield();
-    }
+    check_possible_preemption(highest_prio_t);
+
   }
-   
+
   intr_set_level (old_level);
+   
 }
+
+  /* Updates thread t's priority (which is in then ready list)
+    while keeping the list properly sorted*/
+  void
+  update_priority_in_ready_list(struct thread *t, int new_priority)
+  {
+    enum intr_level old_level;
+
+
+
+    old_level = intr_disable ();
+
+    if (t->status == THREAD_READY){
+      list_remove(&t->elem);
+      t->priority = new_priority;
+      list_insert_ordered (&ready_list, &t->elem, 
+                          thread_priority_more, NULL);
+    }
+
+    intr_set_level (old_level);
+  }
 
 /* Returns the current thread's priority. */
 int

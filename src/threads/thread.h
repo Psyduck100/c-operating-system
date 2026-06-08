@@ -122,6 +122,7 @@ void thread_tick (void);
 void thread_print_stats (void);
 
 typedef void thread_func (void *aux);
+void check_possible_preemption(struct thread *);
 tid_t thread_create (const char *name, int priority, thread_func *, void *);
 
 void thread_block (void);
@@ -149,6 +150,8 @@ void thread_foreach (thread_action_func *, void *);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
+struct thread *get_highest_prio_ready_thread(void);
+void update_priority_in_ready_list (struct thread *, int);
 bool thread_priority_more(const struct list_elem *a, const struct list_elem *b, void *aux);
 
 int thread_get_nice (void);
