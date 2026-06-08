@@ -130,6 +130,8 @@ bool wakeup_tick_less (const struct list_elem *, const struct list_elem *,
                        void *aux);
 bool thread_priority_more (const struct list_elem *, const struct list_elem *,
                        void *aux);
+bool thread_priority_more_donor (const struct list_elem *, const struct list_elem *,
+                       void *aux);
 
 void thread_unblock (struct thread *);
 void wakeup_threads (void);

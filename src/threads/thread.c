@@ -261,7 +261,7 @@ thread_sleep (int64_t wakeup_tick) {
   ,or false otherwise*/
 bool 
 wakeup_tick_less (const struct list_elem *a, const struct list_elem *b, 
-                  void *aux)
+                  void *aux UNUSED)
 {
   struct thread *ta = list_entry (a, struct thread, elem);
   struct thread *tb = list_entry (b, struct thread, elem);
@@ -278,10 +278,27 @@ wakeup_tick_less (const struct list_elem *a, const struct list_elem *b,
   priority, or false otherwise*/
 bool 
 thread_priority_more (const struct list_elem *a, const struct list_elem *b, 
-                  void *aux)
+                  void *aux UNUSED)
 {
   struct thread *ta = list_entry (a, struct thread, elem);
   struct thread *tb = list_entry (b, struct thread, elem);
+  if (ta->priority > tb->priority)
+    return true;
+  else
+    {
+      return false;
+    }
+}
+
+
+/*Returns true if list elem thread A's priority is greater than thread B's 
+  priority, or false otherwise*/
+bool 
+thread_priority_more_donor (const struct list_elem *a, const struct list_elem *b, 
+                  void *aux UNUSED)
+{
+  struct thread *ta = list_entry (a, struct thread, donor_elem);
+  struct thread *tb = list_entry (b, struct thread, donor_elem);
   if (ta->priority > tb->priority)
     return true;
   else
@@ -296,12 +313,12 @@ thread_priority_more (const struct list_elem *a, const struct list_elem *b,
    list, appended to the ready list and unblocked.*/
 void
 wakeup_threads (void) {
+
+  enum intr_level old_level;
+
+  old_level = intr_disable ();
+
   while (!list_empty (&sleep_list)) {
-
-
-    enum intr_level old_level;
-
-    old_level = intr_disable ();
 
     /*gets threads from front of list (list is orderered highest priority first)*/
     struct thread *t = list_entry(list_front (&sleep_list),struct thread, elem);
@@ -320,10 +337,8 @@ wakeup_threads (void) {
     thread_unblock (woken_up_thread);
 
 
-    intr_set_level (old_level);
-
   }
-
+  intr_set_level (old_level);
 }
 
 
@@ -453,13 +468,15 @@ thread_set_priority (int new_priority)
   // Get the current thread
   struct thread *cur = thread_current ();
 
-  // Set the base priority to the new one
-  cur->base_priority = new_priority;
-  
+
   enum intr_level old_level;
+
 
   old_level = intr_disable ();
 
+    // Set the base priority to the new one
+  cur->base_priority = new_priority;
+  
   // If there's no donors or the new priority is higher, 
   // set priority equal to the one new
   if (list_empty (&cur->donations_list) || new_priority > cur->priority){
@@ -473,13 +490,12 @@ thread_set_priority (int new_priority)
       cur->priority = top_donor->priority;
     }
   }
-  
 
   if (!list_empty (&ready_list)){
 
     /*get highest priority thread from list (since list is sorted
     highest prioirty is front element)*/
-    struct thread *highest_prio_t = list_entry(list_front (&sleep_list),
+    struct thread *highest_prio_t = list_entry(list_front (&ready_list),
                                                      struct thread, elem);
 
     /*check if new priority is less than a ready threads and if so yield*/
@@ -619,6 +635,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->magic = THREAD_MAGIC;
   /*initialize donations list*/
   list_init (&t->donations_list);
+  t->waiting_lock = NULL;
   
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
