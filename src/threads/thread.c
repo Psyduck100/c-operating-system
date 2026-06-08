@@ -10,6 +10,7 @@
 #include "threads/palloc.h"
 #include "threads/switch.h"
 #include "threads/synch.h"
+#include "devices/timer.h"
 #include "threads/vaddr.h"
 #ifdef USERPROG
 #include "userprog/process.h"
@@ -479,7 +480,7 @@ thread_set_priority (int new_priority)
     /*get highest priority thread from list (since list is sorted
     highest prioirty is front element)*/
     struct thread *highest_prio_t = list_entry(list_front (&sleep_list),
-                                                     thread, elem);
+                                                     struct thread, elem);
 
     /*check if new priority is less than a ready threads and if so yield*/
     if (new_priority < highest_prio_t->priority){
