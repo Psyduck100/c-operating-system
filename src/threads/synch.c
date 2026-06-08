@@ -115,7 +115,7 @@ sema_up (struct semaphore *sema)
   old_level = intr_disable ();
   if (!list_empty (&sema->waiters)) {
     // Sort waiter list before unblocking threads in case of priority donation
-    //list_sort(&sema->waiters, thread_priority_more, NULL); 
+    list_sort(&sema->waiters, thread_priority_more, NULL); 
     thread_unblock (list_entry (list_pop_front (&sema->waiters),
                     struct thread, elem));
               
@@ -428,7 +428,7 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
   ASSERT (lock_held_by_current_thread (lock));
 
   if (!list_empty (&cond->waiters)){
-    //list_sort(&cond->waiters, sema_priority_less, NULL);
+    list_sort(&cond->waiters, sema_priority_less, NULL);
     sema_up (&list_entry (list_pop_front (&cond->waiters),
             struct semaphore_elem, elem)->semaphore);
   } 
