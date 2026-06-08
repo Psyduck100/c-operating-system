@@ -8,7 +8,7 @@
 
 >> Fill in the names and email addresses of your group members.
 
-FirstName LastName <email@domain.example>
+Arvindh Sengu <arvindh.sengu@mail.utoronto.ca>
 FirstName LastName <email@domain.example>
 FirstName LastName <email@domain.example>
 
@@ -31,9 +31,12 @@ FirstName LastName <email@domain.example>
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
 In thread.c
-/* List of processes in THREAD_BLOCKED state, that is, processes
-   that are blocked and cannot run. */
-static struct list blocked_list;
+
+/* List of processes in THREAD_BLOCKED state because it is
+ currently sleeping, that is, processesthat are blocked and 
+ cannot run because they are waiting to be woken up, ordered 
+ by ascending wakeup-tick field */
+static struct list sleep_list;
 
 
 In thread.h
@@ -61,7 +64,16 @@ struct thread
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
     };
-Added a wakeup_tick to the thread_struct so when a thread sleeps it knows the tick to wakeup.
+int64_t wakeup_tick: wakeup_tick to the thread_struct so when a thread sleeps it knows the tick to wakeup.
+
+
+
+
+
+
+
+
+
 
 
 ---- ALGORITHMS ----
@@ -69,21 +81,54 @@ Added a wakeup_tick to the thread_struct so when a thread sleeps it knows the ti
 >> A2: Briefly describe what happens in a call to timer_sleep(),
 >> including the effects of the timer interrupt handler.
 
+timer_sleep() sleeps the active thread for 'ticks' ticks by calling thread_sleep() with the current tick + the amount of ticks to sleep
+
+thread_sleep() sets the threads wakeup-tick field, then inserts the thread into the sleep_list ordered by its wakeup-tick via list_insert_ordered with wakeup_tick_less
+as the comparator function, then it blocks the thread by calling thread_block()
+
+wakeup_tick_less() compares two threads a and b, and returns true if a's wakeup-tick field value < b's wakeup-tick field value
+
+timer_interrupt() increments ticks, calls thread_tick() and the calls wakeup_threads()
+
+wakeup_threads() continuosly compares the current tick against the thread with the smallest wakeup-tick field in the sleep_list. If the current tick
+> wakeup-tick of the earliest thread (the foremost item in the list), then the function returns with no effect. Otherwise it will continue to wake up threads by calling list_pop_front()
+and calling thread_unblock on the popped thread
+
+
+
 >> A3: What steps are taken to minimize the amount of time spent in
 >> the timer interrupt handler?
+The sleeping threads are ordered by increasing wakeup-tick so the earliest thread to be woken up is at
+the front of the list. Thus scanning the list to see if a wakeup needs to be perfomed is only o(1) by
+peeking at the front of the linked list. In an unsorted list the check would need to be o(n) as we would
+scan the entire sleep_list
 
 ---- SYNCHRONIZATION ----
 
 >> A4: How are race conditions avoided when multiple threads call
 >> timer_sleep() simultaneously?
 
+timer_sleep() calls thread_sleep() in which interrupts are disabled (intr_disable()) before any writing is done to wakeup-ticks field
+and any threads are blocked and moved to the sleep_list. No race conditions as these two operations will be atomic.
+
 >> A5: How are race conditions avoided when a timer interrupt occurs
 >> during a call to timer_sleep()?
+If an interrupt happens before a thread is slept, an interrupt could cause start to be slightly stale. Once inside
+thread_sleep() interrupts are disabled before wakeup_tick and sleep_list are modified so a timer interrupt will
+not corrupt any ordering or result in a partially modified thread. 
 
 ---- RATIONALE ----
 
 >> A6: Why did you choose this design?  In what ways is it superior to
 >> another design you considered?
+1. ordered vs unordered sleep_list: by ordering by wakeup_tick we ensure that checking if any wake-ups need to happen to have
+time complexity O(1) vs O(n) (checking the front of the list vs entire list). However this results in insertions being O(n) vs O(1). 
+However, we still chose this approach because checking for wake up happens on every timer interrupt which is magnitudes more frequent 
+than insertion into the list, so overall it is more effecient.
+
+2. sleep_list vs busy_waiting. The original implementation just spun in a while loop calling thread_yield(). The new design blocks
+the thread and only wakes it up when it is time. This is superior because now blocked threads dont consume CPU time and cause unneeded 
+context switches. 
 
              PRIORITY SCHEDULING
              ===================
@@ -94,14 +139,77 @@ Added a wakeup_tick to the thread_struct so when a thread sleeps it knows the ti
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+struct thread
+  {
+    /* Owned by thread.c. */
+    tid_t tid;                          /* Thread identifier. */
+    enum thread_status status;          /* Thread state. */
+    char name[16];                      /* Name (for debugging purposes). */
+    uint8_t *stack;                     /* Saved stack pointer. */
+    int priority;                       /* Priority. */
+    struct list_elem allelem;           /* List element for all threads list. */
+    struct list donations_list;         /* List of threads that have donated priority. */
+    struct list_elem donor_elem;        /* List element for donotions list. */
+    int base_priority;                  /* Original priority of thread before any donations. */
+    struct lock *waiting_lock;          /* The lock that this thread is waiting for. */
+    int64_t wakeup_tick;                /* The tick at which to wake up the thread 
+                                          if thread is sleeping. Value will be 0
+                                          if thread is not sleeping. */
+   
+
+    /* Shared between thread.c and synch.c. */
+    struct list_elem elem;              /* List element. */
+
+#ifdef USERPROG
+    /* Owned by userprog/process.c. */
+    uint32_t *pagedir;                  /* Page directory. */
+#endif
+
+    /* Owned by thread.c. */
+    unsigned magic;                     /* Detects stack overflow. */
+  };
+
+Added: 
+    int base_priority: stores thread original priority before any donations so it can be restored after 
+    the lock is released
+    
+    int priority: current priority of thread
+
+    struct lock *waiting_lock: the lock this thread is waiting to aquire, NULL if not waiting
+
+    struct list donations_list: list of threads donaiting priority to this thread, each entry is a donor. ordered
+    by decreasing priority
+
+    struct list_elem donor_elem this threads list elem (for inserting into another threads donations_list)
+
+
+
+
+
 >> B2: Explain the data structure used to track priority donation.
 >> Use ASCII art to diagram a nested donation.  (Alternately, submit a
 >> .png file.)
+
+Each thread has a donations_list. A list of threads donating to it. Each thread also has a 
+waiting_lock pointer which resolves which thread to donate too. 
+
+Thread A (base priority, priority: 30) (waiting_lock: L2)
+                    |
+                    | donates to
+                    |
+Thread B (base priority: 10, priority: 30) (waiting_lock: L1) (donations_list: [A])
+                    |
+                    | donates to
+                    |
+Thread C (base priority: 5, priority: 30) (waiting_lock: NULL) (donations_list: [B])
+
 
 ---- ALGORITHMS ----
 
 >> B3: How do you ensure that the highest priority thread waiting for
 >> a lock, semaphore, or condition variable wakes up first?
+
+
 
 >> B4: Describe the sequence of events when a call to lock_acquire()
 >> causes a priority donation.  How is nested donation handled?

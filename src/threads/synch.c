@@ -68,7 +68,7 @@ sema_down (struct semaphore *sema)
   old_level = intr_disable ();
   while (sema->value == 0) 
     {
-      list_push_back (&sema->waiters, &thread_current ()->elem);
+      list_insert_ordered(&sema->waiters, &thread_current () ->elem, thread_priority_more, NULL); // Modified to insert thread at waiters in order of priority
       thread_block ();
     }
   sema->value--;
@@ -113,9 +113,15 @@ sema_up (struct semaphore *sema)
   ASSERT (sema != NULL);
 
   old_level = intr_disable ();
-  if (!list_empty (&sema->waiters)) 
+  if (!list_empty (&sema->waiters)) {
+    // Sort waiter list before unblocking threads in case of priority donation
+    //list_sort(&sema->waiters, thread_priority_more, NULL); 
     thread_unblock (list_entry (list_pop_front (&sema->waiters),
-                                struct thread, elem));
+                    struct thread, elem));
+              
+  }
+    
+    
   sema->value++;
   intr_set_level (old_level);
 }
@@ -155,6 +161,22 @@ sema_test_helper (void *sema_)
       sema_down (&sema[0]);
       sema_up (&sema[1]);
     }
+}
+
+bool
+sema_priority_less (const struct list_elem *sem_a, const struct list_elem *sem_b) 
+{ 
+
+  // Get the semaphore_elems 
+  struct semaphore_elem *sa = list_entry(sem_a, struct semaphore_elem, elem); 
+  struct semaphore_elem *sb = list_entry(sem_b, struct semaphore_elem, elem);
+
+  // Get the threads waiting on each semaphore
+  struct thread *ta = list_entry(list_front(&sa->waiters.semaphores), struct thread, elem);
+  struct thread *tb = list_entry(list_front(&sb->waiters.semaphores), struct thread, elem);
+
+  // Return true if priority of thread a is lower than that of thread b
+  return ta->priority < tb->priority;
 }
 
 /* Initializes LOCK.  A lock can be held by at most a single
@@ -196,8 +218,43 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
-  sema_down (&lock->semaphore);
-  lock->holder = thread_current ();
+  bool success = sema_try_down(&lock->semaphore);
+
+  /*if lock is already acquired by another thread*/
+  if (success == false){
+    struct thread *lock_holder = lock->holder;
+    struct thread *cur_donor = thread_current();
+    cur_donor->waiting_lock = lock;
+
+    /*add the current thread to the list of priority donors
+    for the thread that holds the lock*/
+    list_insert_ordered (&lock_holder->donations_list, &cur_donor->donor_elem, 
+                       thread_priority_more, NULL);
+
+    /*if current priority is greater than lock holder's priority
+    must donate priority to lock_holder and propogate results up
+    if lock_holder is also a possible donor.*/
+    while (lock_holder != NULL && 
+           cur_donor->priority > lock_holder->priority){
+        
+        lock_holder->priority = cur_donor->priority;
+
+        /*check if the lock holder is also waiting on a lock*/
+        if (lock_holder->waiting_lock == NULL){
+          /*if not then no more donations and break*/
+          break;
+        }
+
+        /*if lock holder is waiting on a lock then continue donations*/
+        lock_holder = lock_holder->waiting_lock->holder;
+    }
+
+    sema_down(&lock->semaphore)
+  }
+  else{
+    lock->holder = thread_current ();
+    thread_current()->waiting_lock = NULL;
+  }
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -230,6 +287,59 @@ lock_release (struct lock *lock)
 {
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
+
+  // Get the current thread
+  struct thread *cur = thread_current ();
+
+  // 1. Remove all the donations from threads waiting on this lock
+
+  // Get the first donor_elem of the current thread
+  struct list_elem *donor_elem = list_begin (&cur->donations_list); 
+
+  // Loop to remove donors
+  while (donor_elem != list_end (&cur->donations_list)) { 
+    // Get donor thread from donation list
+    struct thread *donor = list_entry (donor_elem, struct thread, donor_elem) 
+
+    // If donor is waiting on this lock, remove it from the donation list
+    // then go to next element
+    if (donor->waiting_lock == lock) { 
+      donor_elem = list_remove (donor->donor_elem);
+    }
+    // Otherwise, go to the next element
+    else {
+      donor_elem = list_next (donor_elem); 
+    }
+  }
+  
+  // 2. Restore the current threads priority to 
+  // either the highest remaining donation or the base priority 
+
+  // If the donation list is empty, set priority to base priority
+  if (list_empty (&cur->donations_list)) {
+    cur->priority = cur->base_priority;
+  }
+  
+  // Otherwise, set priority equal to the highest reaming donor's priority
+  else {
+
+    //reset priority to base priority
+    cur->priority = cur->base_priority;
+
+    // Get the highest donor_elem
+    struct list_elem *max = list_front (&cur->donations_list);
+
+    // Get the highest donor thread
+    struct thread *top_donor = list_entry (&max, struct thread, donor_elem);
+
+
+    // If the top donor's priority is higher, set priority equal to that
+    if (top_donor->priority > cur->priority) {
+      cur->priority = top_donor->priority;
+    }
+
+    
+  }
 
   lock->holder = NULL;
   sema_up (&lock->semaphore);
@@ -296,6 +406,7 @@ cond_wait (struct condition *cond, struct lock *lock)
   
   sema_init (&waiter.semaphore, 0);
   list_push_back (&cond->waiters, &waiter.elem);
+  list_insert_ordered(&cond->waiters, &waiter.elem, sema_priority_less, NULL)
   lock_release (lock);
   sema_down (&waiter.semaphore);
   lock_acquire (lock);
@@ -316,9 +427,12 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
   ASSERT (!intr_context ());
   ASSERT (lock_held_by_current_thread (lock));
 
-  if (!list_empty (&cond->waiters)) 
+  if (!list_empty (&cond->waiters)){
+    //list_sort(&cond->waiters, sema_priority_less, NULL);
     sema_up (&list_entry (list_pop_front (&cond->waiters),
-                          struct semaphore_elem, elem)->semaphore);
+            struct semaphore_elem, elem)->semaphore);
+  } 
+    
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
