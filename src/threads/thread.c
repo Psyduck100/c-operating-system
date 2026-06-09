@@ -251,7 +251,8 @@ thread_block (void)
    (head is smallest wakeup_tick and is sorted in increasing order). This 
    function alsoblocks the current thread. */
 void
-thread_sleep (int64_t wakeup_tick) {
+thread_sleep (int64_t wakeup_tick) 
+{
 
   enum intr_level old_level;
 

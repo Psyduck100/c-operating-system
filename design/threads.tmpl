@@ -201,7 +201,8 @@ Added:
     int priority: current priority of thread
 
     struct lock *waiting_lock: the lock this 
-    thread is waiting to aquire, NULL if not waiting
+    thread is waiting to aquire, NULL if not waiting.
+    Used when removing donors from donation list.
 
     struct list donations_list: list of threads 
     donaiting priority to this thread, each entry 
@@ -240,35 +241,41 @@ Thread C (base priority: 5, priority: 30) (waiting_lock: NULL) (donations_list: 
 >> B3: How do you ensure that the highest priority thread waiting for
 >> a lock, semaphore, or condition variable wakes up first?
 
-sema_down() inserts into semaphore waiters via 
-list_insert_ordered with thread_priority_more, so waiters
-are always sorted via decreasing priority (prior to donations)
-
 sema_up() sorts the waiters list via list_sort 
 before popping which ensures that the highest priority
-thread gets popped
-
-
+thread gets popped and unblocked from the waiting list.
 
 
 >> B4: Describe the sequence of events when a call to lock_acquire()
->> causes a priority donation.  How is nested donation handled?
-sema_try_down called, if sucess, lock->holder set to thread_current().
-if failure: that means lock is already held. Current thread sets 
-waiting_lock to point at this lock. then the thread inserts itself 
+>> causes a priority donation. How is nested donation handled?
+
+We first check if if (lock_holder != NULL).
+if false: that means lock is already held. As such our current thread
+is a possible donor to the thread that holds the lock. We first set
+waiting_lock to point at this lock. Then the thread inserts itself 
 into the lock holder's donation list via list_insert_ordered 
 via thread_priority_more comparator function (ordered by decreasing priority).
-then in the while loop if the current threads priority is greater than the
- holder's it raises the holder's priority. It continues 
+We handle nested donation by donating upwards in a while loop.
+In the while loop if the current threads priority is greater than the
+lock holder's it raises the lock holder's priority. It continues 
 to go down the chain of waiting_locks to donate it priority to any 
-other threads in this chain.
+other threads in this chain. This happens until a thread isn't waiting on a 
+lock in which case it isn't a donor. Also when we do donation to a 
+lock_holder if the lock_holder is also waiting on a lock and is a donor
+to a thread T then we need to make sure thread T's donations list is kept
+in decreasing order . Since the lock_holder just changed priorities we 
+remove the lock-holder from T's donation list and reinsert it into the
+list via list_insert_ordered via thread_priority_more comparator function 
+(ordered by decreasing priority).
+
 
 >> B5: Describe the sequence of events when lock_release() is called
 >> on a lock that a higher-priority thread is waiting for.
 
-1. Thread L is holding a lock that Thread H is waiting for
+1. Thread L is holding a lock A that Thread H is waiting for
 2. lock_release is called
-3. Remove Thread H from Thread L's donations_list
+3. Remove Thread H and any other thread waiting for lock A from 
+   Thread L's donations_list
 4. Restore L's priority to max(base_priority, top donor's priority)
 5. Release the lock and sema_up
 6. H is unblocked and inserted into the ready list 
