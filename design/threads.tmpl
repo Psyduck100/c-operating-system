@@ -9,8 +9,8 @@
 >> Fill in the names and email addresses of your group members.
 
 Arvindh Sengu <arvindh.sengu@mail.utoronto.ca>
-FirstName LastName <email@domain.example>
-FirstName LastName <email@domain.example>
+Alex Xu <alexxx.xu@mail.utoronto.ca>
+Rogers Dai <roger.dai@mail.utoronto.ca>
 
 ---- PRELIMINARIES ----
 
@@ -277,7 +277,7 @@ list via list_insert_ordered via thread_priority_more comparator function
 3. Remove Thread H and any other thread waiting for lock A from 
    Thread L's donations_list
 4. Restore L's priority to max(base_priority, top donor's priority)
-5. Release the lock and sema_up
+5. Release the lock (lock->holder = NULL;) and sema_up
 6. H is unblocked and inserted into the ready list 
 7. After H is unblocked, L yields since it has lower priority 
 8. H acquires the lock and continues executions 
@@ -295,13 +295,14 @@ Potential scenario with a race condition:
 
 - Thread A calls the thread_set_priority() function
 - Code goes through Thread A's donation list and is about to update its priority
-- Interrupt happens
-- Thread B donates its priority to Thread A
-- Code modifies Thread A's donation list
-- Interrupt done, back to Thread A
+- Interrupt happens and causes a context switch
+- Thread B attempts to acquire a lock held by Thread A and 
+    donates its priority to Thread A
+- Program modifies Thread A's donation list
+- Context switches back to Thread A
 - Thread A sets its priority based on the old list 
     - Program counter has already 
-    passed the "read donation list line
+    passed the "read donation" list line
 - Thread B's donated priority is now lost
 
 How our implementation deals with this:
@@ -317,10 +318,12 @@ and wries the priority of the caller thread
 Can you use a lock to avoid this race?:
 
 No using locks would not avoid this race. thread_set_priority can be 
-called while a thread already holds a lock and so using a lock might 
-cause a deadlock. Additionally, lock_acquire modifies donations 
-in the function itself, so using a lock to resolve this condition 
-could also potentially cause a deadlock. 
+called while a thread already holds a lock and so using an additional 
+lock could cause a deadlock. This is because locks depend on the priority 
+information being correct to work properly, therefore using a lock to 
+protect the priority information that locks depend on would result in a 
+circular dependency where neither can safely run without the other being 
+correct.
 
 
 ---- RATIONALE ----
@@ -328,7 +331,8 @@ could also potentially cause a deadlock.
 >> B7: Why did you choose this design?  In what ways is it superior to
 >> another design you considered?
 
-1. Priority Donation using donations_list in thread struct
+1. 
+Priority Donation using donations_list in thread struct
 We chose to implement a linked list for each thread that a list
 of all the threads donating to it, as well as a waiting_lock field 
 that stores a pointer to the lock that the thread is waiting for.
@@ -344,16 +348,57 @@ thread loses it's highest donor and consequently should lose it's priority,
 donation_priority has no way of tracing that interaction. 
 
 2. 
-We insert in donations_list in sorted order. The alternative would be an
-an unsorted list that you would have to iterate through to find the maximum.
+We insert in donations_list in sorted order and keep it sorted throughout all 
+functions. The alternative would be an unsorted list that you would have to 
+iterate through to find the maximum.
 
-Similiar to the decision for sleep_list although insertion 
-increases to O(n) from O(1), and similiarly for scanning, it decreases to
-O(1) from O(n). 
+Similar to the decision for sleep_list although insertion 
+increases to O(n) from O(1), when we need to find the highest priority, 
+our time complexity decreases to O(1) from O(nlogn) 
+(O(nlogn) would be from sorting). 
 
 Since we modify donation_list way less often than reading the 
-max, the tradeoff results in an overall more effecient program.
+max priority, the tradeoff results in an overall more effecient program.
 
+3.
+Our waiting list for semapores, locks, and condvar are inserted normally
+without ordering, and then sorted when we need to get the highest 
+priority waiter.
+
+Contrasting our donations list and sleep list which are kept sorted
+we decided to not keep waiters for semaphores, locks and condvar in 
+sorted order and instead sort when needed. This would make our inserts 
+O(1) instead of O(n) but make whenever we needed to get the nexthighest 
+priority waiter take O(nlogn) from sorting.
+
+We did this for a few reasons.
+
+First of all our implementation of priority donation for threads is
+done within locks and our lock implementation functions. Our locks 
+all have priority donation logic embedded, but semaphores or condvar 
+do not have the same. This means semaphore's and condvar's waiter's 
+priorities may change without us being able to keep the waiter list 
+sorted. As such to make sure semaphores and condvar work properly 
+in future contexts or in general we dp a simple insert and sort.
+Although it may be slightly slower it is much safer, more modular
+,and more future proof.
+
+Also unlike a sleep list which is checked on every tick semaphores,
+and condvar checks (for the highest priority waiter) happen much
+less frequently and as such the O(nlogn) sort each time would
+not be as costly.
+
+4.
+We also designed our preemption (checking if current thread needs
+to yield to higher priority thread) so that it isn't within the
+thread_unblock function. We could have added an extra check within
+thread_unblock, however we thought it would be poor design.
+thread_unblock is a very intergral function that is used in many
+places within an os, so to keep thread_unblock modular and safe to
+use in more contexts we instead checked preemption only in cases where
+a thread is added to the ready list. For example we check preemption
+within thread_create, sema_up (lock_acquire and lock_release which
+calls sema_up), thread_set_priority,
 
 
                SURVEY QUESTIONS
@@ -368,14 +413,34 @@ the quarter.
 >> In your opinion, was this assignment, or any one of the three problems
 >> in it, too easy or too hard?  Did it take too long or too little time?
 
+We felt that this assignment wasn't too easy nor too hard, and that the 
+time allocated was fair. We spent most of our time debugging the priority 
+donation, because there were often times where changin 2-3 lines would 
+either result in every test failing or a couple more tests passing. 
+
 >> Did you find that working on a particular part of the assignment gave
 >> you greater insight into some aspect of OS design?
+
+Yes, in specific the priority scheduler gave us a greater insight into 
+the behaviour of threads and locks. Actually implementing a scheduler 
+to handle priority donation helped a lot with understanding all the 
+edge cases with threads and locks.
 
 >> Is there some particular fact or hint we should give students in
 >> future quarters to help them solve the problems?  Conversely, did you
 >> find any of our guidance to be misleading?
 
+https://www.youtube.com/watch?v=myO2bs5LMak
+Share this video with all future students
+
+The semaphores and semaphore_elem structs were confusing in the sense that 
+each thread had its own personal semaphore. So when you described the 
+waiters list as a list of threads waiting for the semaphore, it was a bit 
+misleading.
+
 >> Do you have any suggestions for the TAs to more effectively assist
 >> students, either for future quarters or the remaining projects?
+
+
 
 >> Any other comments?
