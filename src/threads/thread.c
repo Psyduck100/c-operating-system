@@ -261,10 +261,17 @@ thread_sleep (int64_t wakeup_tick)
   struct thread *cur_thread = thread_current ();
   ASSERT (is_thread (cur_thread));
 
+  /* Disable interrupts to safely manipulate 
+     thread states without any race conditions */
   old_level = intr_disable ();
   ASSERT (cur_thread->status == THREAD_RUNNING);
   cur_thread->wakeup_tick = wakeup_tick;
+  /* Insert in ascending order based on wakeup tick
+     so that timer interrupt can just check the first
+     element to see if it needs to wake up any threads */
   list_insert_ordered (&sleep_list, &cur_thread->elem, wakeup_tick_less, NULL);
+  /* Blocking the thread removes it from the ready list
+     so that we avoid busy-waiting approach */
   thread_block ();
   intr_set_level (old_level);
 }
@@ -301,8 +308,8 @@ thread_priority_more (const struct list_elem *a, const struct list_elem *b,
     }
 }
 
-/*Returns true if list elem thread A's priority is greater than thread B's
-  priority, or false otherwise*/
+/*Returns true if list donor_elem thread A's priority is greater than 
+  thread B's priority, or false otherwise*/
 bool
 thread_priority_more_donor (const struct list_elem *a,
                             const struct list_elem *b, void *aux UNUSED)
@@ -327,6 +334,8 @@ wakeup_threads (void)
 
   enum intr_level old_level;
 
+  /* Disables interrupts to prevent sleep list from 
+     being altered at the same time (races) */
   old_level = intr_disable ();
 
   while (!list_empty (&sleep_list))
@@ -340,12 +349,15 @@ wakeup_threads (void)
 
       int64_t cur_tick = timer_ticks ();
 
+      /*our sleep listed is sorted in ascending order so if the current
+        thread should still be asleep all threads after should be asleep
+        as well*/
       if (t->wakeup_tick > cur_tick)
         {
           break;
         }
 
-      /*wake up thread by removing it from sleep list and unblocking*/
+      /* Wake up thread by removing it from sleep list and unblocking it */
       struct thread *woken_up_thread
           = list_entry (list_pop_front (&sleep_list), struct thread, elem);
       thread_unblock (woken_up_thread);
@@ -474,24 +486,23 @@ void
 thread_set_priority (int new_priority)
 {
 
-  // Get the current thread
   struct thread *cur = thread_current ();
 
   enum intr_level old_level;
 
   old_level = intr_disable ();
 
-  // Set the base priority to the new one
+  /*Set the base priority to the new one*/
   cur->base_priority = new_priority;
 
-  // If there's no donors or the new priority is higher,
-  // set priority equal to the one new
+  /* If there's no donors or the new priority is higher,
+     set priority equal to the new one */
   if (list_empty (&cur->donations_list) || new_priority > cur->priority)
     {
       cur->priority = new_priority;
     }
 
-  // Otherwise, set priority to max(top donor's priority, new_priority)
+  /*Otherwise, set priority to max(top donor's priority, new_priority)*/
   else
     {
       struct thread *top_donor = list_entry (list_front (&cur->donations_list),
@@ -508,7 +519,7 @@ thread_set_priority (int new_priority)
 
   if (highest_prio_t != NULL)
     {
-      /*check if new priority is less than a ready threads and if so yield*/
+      /*check if new priority is less than a ready thread and if so yield*/
       check_possible_preemption (highest_prio_t);
     }
 

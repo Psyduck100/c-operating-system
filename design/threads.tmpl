@@ -109,10 +109,10 @@ and calling thread_unblock on the popped thread
 >> the timer interrupt handler?
 The sleeping threads are ordered by increasing wakeup-tick so the
 earliest thread to be woken up is at the front of the list. 
-Thus scanning the list to see if a wakeup needs to be perfomed 
-is only o(1) by peeking at the front of the linked list. In an 
-unsorted list the check would need to be o(n) as we would
-scan the entire sleep_list
+Thus, scanning the list to see if a wakeup needs to be perfomed 
+is only O(1) by peeking at the front of the linked list. In an 
+unsorted list the check would need to be O(n) as we would
+scan the entire sleep_list.
 
 ---- SYNCHRONIZATION ----
 
@@ -122,14 +122,14 @@ scan the entire sleep_list
 timer_sleep() calls thread_sleep() in which interrupts 
 are disabled (intr_disable()) before any writing is done 
 to wakeup-ticks field and any threads are blocked and 
-moved to the sleep_list. No race conditions as these 
-two operations will be atomic.
+moved to the sleep_list. No race conditions occur 
+as these two operations will be atomic.
 
 >> A5: How are race conditions avoided when a timer interrupt occurs
 >> during a call to timer_sleep()?
 If an interrupt happens before a thread is 
 slept, an interrupt could cause start to be 
-slightly stale. Once inside thread_sleep() 
+slightly stale. Once inside thread_sleep(), 
 interrupts are disabled before wakeup_tick
 and sleep_list are modified so a timer interrupt will
 not corrupt any ordering or result in a partially 
@@ -139,7 +139,7 @@ modified thread.
 
 >> A6: Why did you choose this design?  In what ways is it superior to
 >> another design you considered?
-1. ordered vs unordered sleep_list: by ordering by 
+1. Ordered vs unordered sleep_list: by ordering by 
 wakeup_tick we ensure that checking if any wake-ups
 need to happen to have time complexity O(1) vs O(n) 
 (checking the front of the list vs entire list). 
@@ -196,13 +196,14 @@ struct thread
 Added: 
     int base_priority: stores thread original priority 
     before any donations so it can be restored after 
-    the lock is released
+    the lock is released/donations are gone.
     
     int priority: current priority of thread
 
     struct lock *waiting_lock: the lock this 
     thread is waiting to aquire, NULL if not waiting.
-    Used when removing donors from donation list.
+    If a thread has released a lock, this field is used to 
+    filter out which threads need to be removed from its donor list
 
     struct list donations_list: list of threads 
     donaiting priority to this thread, each entry 
@@ -249,21 +250,22 @@ thread gets popped and unblocked from the waiting list.
 >> B4: Describe the sequence of events when a call to lock_acquire()
 >> causes a priority donation. How is nested donation handled?
 
-We first check if if (lock_holder != NULL).
+We first check if (lock_holder != NULL).
 if false: that means lock is already held. As such our current thread
 is a possible donor to the thread that holds the lock. We first set
 waiting_lock to point at this lock. Then the thread inserts itself 
 into the lock holder's donation list via list_insert_ordered 
 via thread_priority_more comparator function (ordered by decreasing priority).
+
 We handle nested donation by donating upwards in a while loop.
 In the while loop if the current threads priority is greater than the
 lock holder's it raises the lock holder's priority. It continues 
-to go down the chain of waiting_locks to donate it priority to any 
+to go down the chain of waiting_locks to donate its priority to any 
 other threads in this chain. This happens until a thread isn't waiting on a 
-lock in which case it isn't a donor. Also when we do donation to a 
-lock_holder if the lock_holder is also waiting on a lock and is a donor
-to a thread T then we need to make sure thread T's donations list is kept
-in decreasing order . Since the lock_holder just changed priorities we 
+lock, in which case it isn't a donor. Also when we do donation to a 
+lock_holder, if the lock_holder is also waiting on a lock and is a donor
+to a thread T, then we need to make sure thread T's donations list is kept
+in decreasing order. Since the lock_holder just changed priorities, we 
 remove the lock-holder from T's donation list and reinsert it into the
 list via list_insert_ordered via thread_priority_more comparator function 
 (ordered by decreasing priority).
@@ -281,8 +283,6 @@ list via list_insert_ordered via thread_priority_more comparator function
 6. H is unblocked and inserted into the ready list 
 7. After H is unblocked, L yields since it has lower priority 
 8. H acquires the lock and continues executions 
-
-
 
 
 ---- SYNCHRONIZATION ----
@@ -308,7 +308,7 @@ Potential scenario with a race condition:
 How our implementation deals with this:
 
 Our implementation disables interrupts before changing 
-any priority or checking the donation list
+any priority or checking the donation list.
 This is due to the fact that priority donation
 occurs in the lock_acqure function which can be called
 from another thread. Disabling interrupts prevents
@@ -332,7 +332,7 @@ correct.
 >> another design you considered?
 
 1. 
-Priority Donation using donations_list in thread struct
+Priority Donation using donations_list in thread struct.
 We chose to implement a linked list for each thread that a list
 of all the threads donating to it, as well as a waiting_lock field 
 that stores a pointer to the lock that the thread is waiting for.
@@ -352,7 +352,7 @@ We insert in donations_list in sorted order and keep it sorted throughout all
 functions. The alternative would be an unsorted list that you would have to 
 iterate through to find the maximum.
 
-Similar to the decision for sleep_list although insertion 
+Similar to the decision for sleep_list, although insertion 
 increases to O(n) from O(1), when we need to find the highest priority, 
 our time complexity decreases to O(1) from O(nlogn) 
 (O(nlogn) would be from sorting). 
@@ -365,10 +365,10 @@ Our waiting list for semapores, locks, and condvar are inserted normally
 without ordering, and then sorted when we need to get the highest 
 priority waiter.
 
-Contrasting our donations list and sleep list which are kept sorted
+Contrasting our donations list and sleep list which are kept sorted,
 we decided to not keep waiters for semaphores, locks and condvar in 
 sorted order and instead sort when needed. This would make our inserts 
-O(1) instead of O(n) but make whenever we needed to get the nexthighest 
+O(1) instead of O(n) but make whenever we needed to get the next highest 
 priority waiter take O(nlogn) from sorting.
 
 We did this for a few reasons.
@@ -378,27 +378,33 @@ done within locks and our lock implementation functions. Our locks
 all have priority donation logic embedded, but semaphores or condvar 
 do not have the same. This means semaphore's and condvar's waiter's 
 priorities may change without us being able to keep the waiter list 
-sorted. As such to make sure semaphores and condvar work properly 
-in future contexts or in general we dp a simple insert and sort.
-Although it may be slightly slower it is much safer, more modular
-,and more future proof.
+sorted. As such, to make sure semaphores and condvar work properly 
+in future contexts or in general, we do a simple insert and sort.
+Although it may be slightly slower it is much safer, more modular,
+and more future proof.
 
 Also unlike a sleep list which is checked on every tick semaphores,
-and condvar checks (for the highest priority waiter) happen much
-less frequently and as such the O(nlogn) sort each time would
-not be as costly.
+condvar checks (for the highest priority waiter) happen much
+less frequently, therefore the total O(nlogn) sorts would not be as costly.
 
 4.
-We also designed our preemption (checking if current thread needs
-to yield to higher priority thread) so that it isn't within the
-thread_unblock function. We could have added an extra check within
-thread_unblock, however we thought it would be poor design.
-thread_unblock is a very intergral function that is used in many
-places within an os, so to keep thread_unblock modular and safe to
-use in more contexts we instead checked preemption only in cases where
-a thread is added to the ready list. For example we check preemption
-within thread_create, sema_up (lock_acquire and lock_release which
-calls sema_up), thread_set_priority,
+We also designed our preemption checks (checking if current thread needs
+to yield to a higher priority thread) so that it isn't within the
+thread_unblock function. 
+
+We could have added an extra check within thread_unblock to make preemption
+easy, however we thought it would be poor design. Thread_unblock is a very 
+integral function that is used in many places within an os where interrupts 
+are off, or yielding mid-way would be unsafe. 
+
+So to keep thread_unblock modular and safe to use in all contexts we instead
+checked preemption only in cases where we know it is safe. For example we 
+check preemption within thread_create only after the new thread is added to 
+the ready list. We check preepmtion within sema_up only after the highest 
+priority waiter is added to the ready list.
+
+Our design choice makes sure thread_unblock is simple, modular, future proof,
+and safe, while still making sure we preempt at the right times.
 
 
                SURVEY QUESTIONS

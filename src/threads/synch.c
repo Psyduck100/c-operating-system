@@ -117,8 +117,8 @@ sema_up (struct semaphore *sema)
 
   if (!list_empty (&sema->waiters))
     {
-      // Sort waiter list before unblocking threads in case of priority
-      // donation
+      /* Sort waiter list before unblocking threads in case of priority
+         donation */
       list_sort (&sema->waiters, thread_priority_more, NULL);
       thread_unblock (
           list_entry (list_pop_front (&sema->waiters), struct thread, elem));
@@ -201,7 +201,7 @@ lock_init (struct lock *lock)
 
 /* Acquires LOCK, sleeping until it becomes available if
    necessary.  The lock must not already be held by the current
-   thread.
+   thread. Also updates priorities based on priority donation.
 
    This function may sleep, so it must not be called within an
    interrupt handler.  This function may be called with
@@ -220,7 +220,8 @@ lock_acquire (struct lock *lock)
 
   struct thread *lock_holder = lock->holder;
   struct thread *cur_t = thread_current ();
-  /*if lock is already acquired by another thread*/
+
+  /*if lock is already acquired by another thread then must donate priority*/
   if (lock_holder != NULL)
     {
       struct thread *cur_donor = cur_t;
@@ -308,23 +309,22 @@ lock_release (struct lock *lock)
   enum intr_level old_level;
   old_level = intr_disable ();
 
-  // Get the current thread
   struct thread *cur = thread_current ();
 
-  // 1. Remove all the donations from threads waiting on this lock
+  /* 1. Remove all the donations from threads waiting on this lock */
 
-  // Get the first donor_elem of the current thread
+  /* Get the first donor_elem of the current thread */
   struct list_elem *cur_donor_elem = list_begin (&cur->donations_list);
 
-  // Loop to remove donors
+  /* Loop to remove donors */
   while (cur_donor_elem != list_end (&cur->donations_list))
     {
-      // Get donor thread from donation list
+      /* Get donor thread from donation list */
       struct thread *donor
           = list_entry (cur_donor_elem, struct thread, donor_elem);
 
-      // If donor is waiting on this lock, remove it from the donation list
-      // then go to next element
+      /* If donor is waiting on this lock, remove it from the donation list
+      then go to next element */
       struct list_elem *next = list_next (cur_donor_elem);
       if (donor->waiting_lock == lock)
         {
@@ -334,29 +334,30 @@ lock_release (struct lock *lock)
       cur_donor_elem = next;
     }
 
-  // 2. Restore the current threads priority to
-  // either the highest remaining donation or the base priority
+  /* 2. Restore the current threads priority to
+     either the highest remaining donation or the base priority */
 
-  // If the donation list is empty, set priority to base priority
+  /* If the donation list is empty, set priority to base priority */
   if (list_empty (&cur->donations_list))
     {
       cur->priority = cur->base_priority;
     }
 
-  // Otherwise, set priority equal to the highest reaming donor's priority
+  /* Otherwise, set priority equal to the highest reaming donor's priority */
   else
     {
 
-      // reset priority to base priority
+      /* reset priority to base priority */
       int highest_priority = cur->base_priority;
 
-      // Get the highest donor_elem
+      /* Get the highest donor_elem. donation list is sorted so it
+         is just the front element*/
       struct list_elem *max = list_front (&cur->donations_list);
 
-      // Get the highest donor thread
+      /* Get the highest donor thread */
       struct thread *top_donor = list_entry (max, struct thread, donor_elem);
 
-      // If the top donor's priority is higher, set priority equal to that
+      /* If the top donor's priority is higher, set priority equal to that */
       if (top_donor->priority > highest_priority)
         {
           highest_priority = top_donor->priority;
@@ -471,6 +472,8 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
 
   if (!list_empty (&cond->waiters))
     {
+      /* Sort list before sema_up and unblock threads in case
+      of priority donation*/
       list_sort (&cond->waiters, sema_priority_more, NULL);
       sema_up (&list_entry (list_pop_front (&cond->waiters),
                             struct semaphore_elem, elem)
