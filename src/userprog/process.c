@@ -18,6 +18,8 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+#define MAX_CLA_ITEMS = 4;
+
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
@@ -29,6 +31,8 @@ tid_t
 process_execute (const char *file_name) 
 {
   char *fn_copy;
+  char *fn_copy2;
+  char *save_ptr;
   tid_t tid;
 
   /* Make a copy of FILE_NAME.
@@ -36,10 +40,28 @@ process_execute (const char *file_name)
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
+
+  /* Make a 2nd copy of FILE_NAME
+     because strtok_r modifies the input string
+     and we need to pass in the whole string into 
+     start_process */
+  fn_copy2 = palloc_get_page (0);
+  if (fn_copy2 == NULL)
+    {
+      palloc_free_page (fn_copy);
+      return TID_ERROR;
+    }
+
   strlcpy (fn_copy, file_name, PGSIZE);
+  strlcpy (fn_copy2, file_name, PGSIZE);
+
+  /* Tokenzie the first argument of cmd line
+     instead of the whole line */
+  char *prog_name = strtok_r (fn_copy, " ", &save_ptr);
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (prog_name, PRI_DEFAULT, start_process, fn_copy);
+  palloc_free_page (fn_copy2);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -53,18 +75,34 @@ start_process (void *file_name_)
   char *file_name = file_name_;
   struct intr_frame if_;
   bool success;
+  char *save_ptr2;
+  
+  //Copy of file to extract filename only
+  char *fn_copy = palloc_get_page (0);
+
+  if (fn_copy == NULL)
+    thread_exit();
+  strlcpy (fn_copy, file_name, PGSIZE);
+  char *prog_name = strtok_r (fn_copy, " ", &save_ptr2);
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+
+
+  success = load (prog_name, &if_.eip, &if_.esp);
+
+  //Free copy 
+  palloc_free_page (fn_copy);
 
   /* If load failed, quit. */
-  palloc_free_page (file_name);
-  if (!success) 
+  if (!success){
+    palloc_free_page(file_name);
     thread_exit ();
+  }
+
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -72,6 +110,73 @@ start_process (void *file_name_)
      arguments on the stack in the form of a `struct intr_frame',
      we just point the stack pointer (%esp) to our stack frame
      and jump to it. */
+  
+  if (success) {
+    char *saveptr;
+    char *token;
+    int argc = 0;
+    char *argv[MAX_CLA_ITEMS + 1];
+
+
+    token = strtok_r(file_name, " ", &saveptr);
+
+    //Parse the CLA
+    while (token != NULL){
+      argv[argc] = token;
+      argc++;
+      token = strtok_r(NULL, " ", &saveptr);
+    }
+
+    argv[argc] = NULL;
+
+    char *user_stack_address[argc];
+
+    //Build User Stack: add parsed CLA
+    int total_arg_chars = 0;
+    for (int i = argc - 1; i >= 0; i--){
+      int arg_chars = strlen(argv[i]) + 1;
+      total_arg_chars += arg_chars;
+
+      if_.esp -= arg_chars;
+      memcpy(if_.esp, argv[i], arg_chars);
+      //save user stack address
+      user_stack_address[i] = if_.esp;
+
+
+    }
+
+    //Align by 4 bytes
+    int padding = (4 - (total_arg_chars % 4)) % 4; 
+    if_.esp -= padding;
+    memset(if_.esp, 0, padding);
+
+    //Add NULL
+    if_.esp -= 4;
+    *(uint32_t*)if_.esp = 0;
+
+
+    //Build User Stack: add CLA item memory addresses
+    for (int i = argc - 1; i >= 0; i--){
+      if_.esp -= 4;
+      *(uint32_t*)if_.esp = (uint32_t)user_stack_address[i];
+    }
+    
+
+    //Add user stack address of 
+    uint32_t argv_addr = (uint32_t)if_.esp;
+    if_.esp -= 4;
+    *(uint32_t*)if_.esp = argv_addr;
+
+    //Add argc
+    if_.esp -= 4;
+    *(uint32_t*)if_.esp = argc;
+
+    //Add fake return address
+    if_.esp -= 4;
+    *(uint32_t*)if_.esp = 0;
+  }
+
+  palloc_free_page(file_name);
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
 }
