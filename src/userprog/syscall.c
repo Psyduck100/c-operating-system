@@ -37,7 +37,7 @@ static bool put_user(uint8_t *udst, uint8_t byte)
 
 /* Returns the current threads file at file descriptor FD */
 static struct file *
-get_file (int fd)
+get_file(int fd)
 {
   struct thread *t = thread_current();
   if (fd < 2 || fd >= 64 || t->fd_table[fd] == NULL)
@@ -92,60 +92,117 @@ static void syscall_handler(struct intr_frame *f UNUSED)
   /*get system call number*/
   bool success = copy_in(&syscall_number, f->esp, sizeof syscall_number);
 
-  if (success == false) {
+  if (success == false)
+  {
     /* fix resources and termiante*/
   }
 
   success = copy_in(args, (uint32_t *)f->esp + 1, sizeof *args * 3);
 
-  if (success == false) {
+  if (success == false)
+  {
     /* fix resources and termiante*/
   }
 
-  switch(syscall_number){
-    case SYS_HALT:
-      /*halt code*/
-      break;
-    case SYS_EXIT:
-      /*exit code*/
-      break;
-    case SYS_EXEC:
-      /*exit code*/
-      break;
-    case SYS_WAIT:
-      /*halt code*/
-      break;
-    case SYS_CREATE:
-      /*exit code*/
-      break;
-    case SYS_REMOVE:
-      /*exit code*/
-      break;
-    case SYS_OPEN:
-      /*halt code*/
-      break;
-    case SYS_FILESIZE:
-      /*exit code*/
-      break;
-    case SYS_READ:
-      /*exit code*/
-      break;
-    case SYS_WRITE:
-      /*halt code*/
-      break;
-    case SYS_SEEK:
-      /*exit code*/
-      break;
-    case SYS_TELL:
-      /*exit code*/
-      break;
-    case SYS_CLOSE:
-      /*exit code*/
-      break;
-    default:
+  switch (syscall_number)
+  {
+  case SYS_HALT:
+    /*halt code*/
+    break;
+  case SYS_EXIT:
+    /*exit code*/
+    break;
+  case SYS_EXEC:
+    /*exit code*/
+    break;
+  case SYS_WAIT:
+    /*halt code*/
+    break;
+  case SYS_CREATE:
+    /*exit code*/
+    break;
+  case SYS_REMOVE:
+    /*exit code*/
+    break;
+  case SYS_OPEN:
+    /*halt code*/
+    break;
+  case SYS_FILESIZE:
+    /*exit code*/
+    break;
+  case SYS_READ:
+    /*exit code*/
+    break;
+  case SYS_WRITE:
+    /*halt code*/
+    break;
+  case SYS_SEEK:
+    /*exit code*/
+    break;
+  case SYS_TELL:
+    /*exit code*/
+    break;
+  case SYS_CLOSE:
+    /*exit code*/
+    break;
+  default:
   }
 
   thread_exit();
 }
 
+/* Creates a new file named FILE initially SIZE bytes in size. Returns true if successful, false otherwise. */
+static bool
+create(const char *file, unsigned initial_size)
+{
+  if (file == NULL)
+    return false;
 
+  /* Acquire the global lock to avoid race conditions */
+  lock_acquire(&filesys_lock);
+  bool result = filesys_create(file, initial_size);
+  lock_release(&filesys_lock);
+  return result;
+}
+
+
+/* Removes the file named FILE. Returns true if successful, false otherwise. */
+static bool
+remove(const char *file)
+{
+  if (file == NULL)
+    return false;
+    
+  /* Acquire the global lock to avoid race conditions */
+  lock_acquire(&filesys_lock);
+  bool result = filesys_remove(file);
+  lock_release(&filesys_lock);
+  return result;
+}
+
+/* Opens the file named FILE. Returns its file descriptor if successful, -1 otherwise. */
+static bool
+open(const char *file)
+{
+  if (file == NULL)
+    return false;
+
+  /* Acquire the global lock to avoid race conditions */
+  lock_acquire(&filesys_lock);
+  struct file *f = filesys_open(file);
+  lock_release(&filesys_lock);
+
+  if (f==NULL)
+    return -1;
+    
+  struct thread *t = thread_current();
+
+  if(t->next_fd >= 64)
+  {
+    file_close(f);
+    return -1;
+  }
+
+  t->fd_table[t->next_fd] = f;
+  return t->next_fd++;
+}
