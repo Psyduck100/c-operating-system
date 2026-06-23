@@ -143,6 +143,33 @@ page_fault (struct intr_frame *f)
   /* Count page faults. */
   page_fault_cnt++;
 
+
+   /*For method 2 of making sure invalid pointers must be rejected 
+   without harm to the kernel or other running processes,*/
+   if (user == false){
+
+      /*This is to make sure that we don't leak resources
+      when checking for invalid pointers. After doing get_user
+      or put_user if there is a fault we need to recover from
+      it. We set f->eip to f->epx to basically skip the portion
+      that caused the page fault so we can do things such as 
+      releasing locks or free memory. We set f->eax to
+      0xffffffff (which is -1) so when we return from page_fault()
+      and go back to get_user() or put_user() they will correctly
+      return -1 and false respectively on failure. Then after
+      resources are properly sorted the processes can be terminated*/
+      f->eip = f->eax;
+      f->eax = 0xffffffff;
+      
+      /*return so we don't kill the process before releasing locks
+      and freeing memory*/
+      return;
+   if(user) {
+      //exit(-1);
+      return;
+   }
+   }
+
   /* Determine cause. */
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
