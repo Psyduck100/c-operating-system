@@ -18,7 +18,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
-#define MAX_CLA_ITEMS = 4;
+#define MAX_CLA_ITEMS 4
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -177,6 +177,8 @@ start_process (void *file_name_)
   }
 
   palloc_free_page(file_name);
+  hex_dump((uintptr_t)if_.esp, if_.esp, (size_t)(PHYS_BASE - (uintptr_t)if_.esp), true);
+
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
 }
