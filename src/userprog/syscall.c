@@ -186,8 +186,9 @@ remove (const char *file)
   return result;
 }
 
-/* Opens the file named FILE. Returns its file descriptor if successful, -1
- * otherwise. */
+/* Opens FILE, adds it to the current thread's file descriptor table, and
+ * returns its file descriptor. Returns -1 if the file coudldn't be opened or
+ * the fd table is full*/
 static bool
 open (const char *file)
 {
@@ -212,4 +213,126 @@ open (const char *file)
 
   t->fd_table[t->next_fd] = f;
   return t->next_fd++;
+}
+
+/* Reads SIZE bytes from the file at FD into BUFFER, or reading from stdin if
+ * FD is 0, and returns the number or bytes read or -1 on error*/
+
+static int
+filesize (int fd)
+{
+  struct file *f = get_file (fd);
+  if (f == NULL)
+    return -1;
+
+  /* Acquire the global lock to avoid race conditions */
+  lock_acquire (&filesys_lock);
+  int size = file_length (f);
+  lock_release (&filesys_lock);
+  return size;
+}
+
+/* Reads from a file and writes to a buffer. Returns the number of bytes
+ * read. */
+
+static int
+read (int fd, void *buffer, unsigned size)
+{
+  if (buffer == NULL)
+    return -1;
+
+  if (fd == 0)
+    {
+      /* Type cast into uint8_t because input_getc returns a uint8_t */
+      uint8_t *buf = buffer;
+      /* Read from standard input */
+      for (unsigned i = 0; i < size; i++)
+        {
+          buf[i] = input_getc ();
+        }
+      return size;
+    }
+
+  struct file *f = get_file (fd);
+  if (f == NULL)
+    return -1;
+
+  /* Acquire the global lock to avoid race conditions */
+  lock_acquire (&filesys_lock);
+  int bytes_read = file_read (f, buffer, size);
+  lock_release (&filesys_lock);
+  return bytes_read;
+}
+
+/* Writes SIZE bytes from BUFFER to either stdout (if FD is 1) or a file,
+ * returning the number of bytes written*/
+
+static int
+write (int fd, void *buffer, unsigned size)
+{
+  if (fd == 1)
+    {
+      /* Write to stdout since fd is 1 */
+      putbuf (buffer, size);
+      return size;
+    }
+
+  struct file *f = get_file (fd);
+  if (f == NULL)
+    return -1;
+
+  /* Acquire the global lock to avoid race conditions */
+  lock_acquire (&filesys_lock);
+  int bytes_written = file_write (f, buffer, size);
+  lock_release (&filesys_lock);
+  return bytes_written;
+}
+
+/* Moves the read/write position of the file at FD to POSITION bytes from the
+ * start of the file*/
+
+static void
+seek (int fd, unsigned position)
+{
+  struct file *f = get_file (fd);
+  if (f == NULL)
+    return;
+
+  /* Acquire the global lock to avoid race conditions */
+  lock_acquire (&filesys_lock);
+  file_seek (f, position);
+  lock_release (&filesys_lock);
+}
+
+/* Returns the current read/write position of the file at FD */
+
+static unsigned
+tell (int fd)
+{
+  struct file *f = get_file (fd);
+  if (f == NULL)
+    return -1;
+
+  /* Acquire the global lock to avoid race conditions */
+  lock_acquire (&filesys_lock);
+  unsigned position = file_tell (f);
+  lock_release (&filesys_lock);
+  return position;
+}
+
+/* Closes the file at FD and sets its entry in the fd table to NULL so the fd
+ * can't be used again */
+
+static void
+close (int fd)
+{
+  struct file *f = get_file (fd);
+  if (f == NULL)
+    return;
+
+  /* Acquire the global lock to avoid race conditions */
+  lock_acquire (&filesys_lock);
+  file_close (f);
+  lock_release (&filesys_lock);
+  thread_current ()->fd_table[fd] = NULL;
 }
