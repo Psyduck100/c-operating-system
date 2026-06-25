@@ -93,7 +93,6 @@ static void
 syscall_handler (struct intr_frame *f UNUSED)
 {
   uint32_t syscall_number;
-  int args[3];
 
   /*get system call number*/
   bool success = copy_in (&syscall_number, f->esp, sizeof syscall_number);
@@ -104,57 +103,82 @@ syscall_handler (struct intr_frame *f UNUSED)
       thread_exit();
     }
 
-  success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 3);
-
-  if (success == false)
-    {
-      /* fix resources and termiante*/
-      thread_exit();
-    }
-
   switch (syscall_number)
     {
     case SYS_HALT:
-      /*halt code*/
+      /*call halt*/
       halt();
       break;
+
     case SYS_EXIT:
-      /*exit code*/
-      exit(args[0]);
+
+      /*get arguments*/
+      int args[1];
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 1);
+
+      /* fix resources and terminate if invalid pointer*/
+      if (success == false)
+      {
+        thread_exit();
+      }
+
+      /*call exit*/
+      exit((int)args[0]);
       break;
+
     case SYS_EXEC:
+
       /*exit call*/
       break;
+
     case SYS_WAIT:
       /*wait call*/
       break;
     case SYS_CREATE:
+      
       f->eax = create(*(char **)args[0], *(unsigned *)args[1]);
       break;
+
     case SYS_REMOVE:
+
       f->eax = remove(*(char **)args[0]);
       break;
+
     case SYS_OPEN:
+
       f->eax = open(*(char **)args[0]);
       break;
+
     case SYS_FILESIZE:
+
       f->eax = filesize(*(int *)args[0]);
       break;
+
     case SYS_READ:
+
       f->eax = read(*(int *)args[0], *(void **)args[1], *(unsigned *)args[2]);
       break;
+
     case SYS_WRITE:
+
       f->eax = write(*(int *)args[0], *(void **)args[1], *(unsigned *)args[2]);
       break;
+
     case SYS_SEEK:
+
       seek(*(int *)args[0], *(unsigned *)args[1]);
       break;
+
     case SYS_TELL:
+
       f->eax = tell(*(int *)args[0]);
       break;
+
     case SYS_CLOSE:
+
       close(*(int *)args[0]);
       break;
+
     default:
     }
 }
@@ -166,15 +190,36 @@ halt (void)
   shutdown_power_off();
 }
 
-
+/*Prints an exit message with the processes name and the exit status
+then exits the thread*/
 static void
 exit (int status){
   
+  /*prints exit  message*/
   printf("%s: exit(%d)\n", thread_current()->name, status);
 
   thread_exit();
 }
 
+/* Creates and executes a new child process from cmdline. The parent
+ process will wait until the child process is finished loading 
+ before continuing. Returns tid of child process on success and
+ -1 on failure*/
+static pid_t 
+exec(const char *cmdline){
+  tid_t tid = process_execute(cmdline);
+
+  if (tid == TID_ERROR){
+    return -1;
+  }
+
+  return tid;
+}
+
+static int
+wait(pid_t pid){
+
+}
 
 
 /* Creates a new file named FILE initially SIZE bytes in size. Returns true if

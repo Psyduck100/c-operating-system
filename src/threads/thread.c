@@ -448,9 +448,33 @@ init_thread(struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->magic = THREAD_MAGIC;
 
+
+   struct thread *cur_t = thread_current();
+
   old_level = intr_disable();
+
   list_push_back(&all_list, &t->allelem);
+
+  /*add new thread as child of current thread*/
+  list_push_back(&cur_t->child_list, &t->child_elem);
+
   intr_set_level(old_level);
+
+
+  /*set parent for new thread*/
+  t->parent = thread_current();
+
+  /*initailize to false*/
+  t->loaded = false;
+
+  /*for exec() initialize the load_sema to 0 so when parent calls 
+  sema_down() parent process will wait until child process is 
+  done loading*/
+  sema_init(&t->load_sema, 0); 
+
+  /*for wait() initialize the wait semaphore to 0 so when parent calls 
+  sema_down() parent process will wait until child process exits*/
+  sema_init(&t->wait, 0); 
 
   /* Initialize fd  table and reserve fd0 and fd1 for stdin, stdout*/
   t->fd_table = palloc_get_page(PAL_ZERO);

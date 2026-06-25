@@ -95,6 +95,24 @@ struct thread
     struct file *running_file;          /* File currently being executed. */
     int next_fd;                        /* Next available file descriptor. */
 
+    struct thread* parent;               /* Pointer to the parent thread/process*/
+
+    struct list_elem child_elem;         /* List element for a child process.
+                                            Can access siblings list*/
+    struct list child_list ;              /* list of children processes*/
+
+    struct semaphore load_sema;          /* A semaphore used to synchronize
+                                            a parent process when it calls 
+                                            exec for when the child process 
+                                            is done loading*/
+    struct semaphore wait;                /* A semaphore used to synchronize
+                                             a parent process when it calls
+                                             wait for when the child process
+                                             exits and parent process can
+                                             continue*/
+    bool loaded;                         /* A bool to represent if the thread
+                                            is done loading*/
+
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 

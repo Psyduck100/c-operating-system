@@ -60,6 +60,31 @@ tid_t process_execute(const char *file_name)
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create(prog_name, PRI_DEFAULT, start_process, fn_copy);
+
+  struct thread *cur_t = thread_current();
+  struct thread *found_child = NULL;
+  struct list_elem *cur_child ;
+
+  /* find child process to sema down on its semaphore so parent process 
+  will wait for child to load and sema up before continuing*/
+  for (cur_child = list_begin (&cur_t->child_list); cur_child != list_end 
+        (&cur_t->child_list); cur_child = list_next(cur_child))
+    {
+      struct thread *child_t = list_entry (cur_child, struct thread, 
+                                           child_elem);
+      if (child_t->tid == tid) {
+        found_child = child_t;
+        sema_down(&child_t->load_sema);
+      }
+    }
+  
+  /* if child was terminated or was not loaded then set
+   tid to TID_ERROR*/
+  if (!found_child || found_child->loaded == false) {
+    tid = TID_ERROR;
+  }
+
+
   palloc_free_page(fn_copy2);
   if (tid == TID_ERROR)
     palloc_free_page(fn_copy);
@@ -92,9 +117,19 @@ start_process(void *file_name_)
 
   success = load(prog_name, &if_.eip, &if_.esp);
 
+
   // Free copy
   palloc_free_page(fn_copy);
 
+
+  /*current thread is the child thread from thread exec*/
+  struct thread *cur_t = thread_current();
+
+  /*we set loaded to whether load was successful or not and do
+  sema up so our parent process from exec can continue*/
+  cur_t->loaded = success;
+  sema_up(&cur_t->load_sema);
+  
   /* If load failed, quit. */
   if (!success)
   {
@@ -108,7 +143,6 @@ start_process(void *file_name_)
      arguments on the stack in the form of a `struct intr_frame',
      we just point the stack pointer (%esp) to our stack frame
      and jump to it. */
-
   if (success)
   {
     char *saveptr;
