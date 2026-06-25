@@ -8,7 +8,7 @@
 
 >> Fill in the names and email addresses of your group members.
 
-FirstName LastName <email@domain.example>
+Arvindh Sengu arvindh.sengu@mail.utoronto.ca
 FirstName LastName <email@domain.example>
 FirstName LastName <email@domain.example>
 
@@ -29,6 +29,7 @@ FirstName LastName <email@domain.example>
 >> A1: Copy here the declaration of each new or changed `struct' or
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
+ 
 
 ---- ALGORITHMS ----
 
@@ -39,6 +40,13 @@ FirstName LastName <email@domain.example>
 ---- RATIONALE ----
 
 >> A3: Why does Pintos implement strtok_r() but not strtok()?
+strtok() uses a hidden global variable to track its position between function calls.
+This is not thread safe, because if two threads tokenize strings at the same time,
+they'd corrupt each other. 
+
+strtok_r takes a save_ptr instead, making it safe to use in a multi-threaded kernel like Pintos
+where multiple threads may be tokenizing strings at the same time.
+
 
 >> A4: In Pintos, the kernel separates commands into a executable name
 >> and arguments.  In Unix-like systems, the shell does this
@@ -53,9 +61,24 @@ FirstName LastName <email@domain.example>
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+struct file **fd_table
+-> array of open files for this thread, indexed by file descriptor (fd)    
+struct file *running_file
+-> the file currently running for this thread          
+int next_fd
+-> tracks the next available fd to assign 
+
 >> B2: Describe how file descriptors are associated with open files.
 >> Are file descriptors unique within the entire OS or just within a
 >> single process?
+
+Each thread has its own fd_table array where each entry points to 
+the struct file for that open file using the fd as its index. Fd's are 
+not shared (i.e: fd3 in thread A and fd3 in thread B are independent).
+
+Fd's are unique within a thread, not across pintos. So two different 
+threads can have the same fd number but they can refer to different 
+files.
 
 ---- ALGORITHMS ----
 
@@ -107,6 +130,14 @@ FirstName LastName <email@domain.example>
 
 >> B10: What advantages or disadvantages can you see to your design
 >> for file descriptors?
+
+Advantages:
+-> Getting a fie from an fd is an array lookup, so O(1), (i.e: fd_table[fd])
+-> Storing the table in a seperate kernel page (using palloc_get_page) keeps struct thread less bloated
+
+Disadvantages:
+-> Fd tables have a limit of 64 fd's so it could be too little for programs that open many files
+
 
 >> B11: The default tid_t to pid_t mapping is the identity mapping.
 >> If you changed it, what advantages are there to your approach?

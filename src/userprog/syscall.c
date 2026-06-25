@@ -101,6 +101,7 @@ syscall_handler (struct intr_frame *f UNUSED)
   if (success == false)
     {
       /* fix resources and termiante*/
+      thread_exit();
     }
 
   success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 3);
@@ -108,54 +109,73 @@ syscall_handler (struct intr_frame *f UNUSED)
   if (success == false)
     {
       /* fix resources and termiante*/
+      thread_exit();
     }
 
   switch (syscall_number)
     {
     case SYS_HALT:
       /*halt code*/
+      halt();
       break;
     case SYS_EXIT:
       /*exit code*/
+      exit(args[0]);
       break;
     case SYS_EXEC:
-      /*exit code*/
+      /*exit call*/
       break;
     case SYS_WAIT:
-      /*halt code*/
+      /*wait call*/
       break;
     case SYS_CREATE:
-      /*exit code*/
+      f->eax = create(*(char **)args[0], *(unsigned *)args[1]);
       break;
     case SYS_REMOVE:
-      /*exit code*/
+      f->eax = remove(*(char **)args[0]);
       break;
     case SYS_OPEN:
-      /*halt code*/
+      f->eax = open(*(char **)args[0]);
       break;
     case SYS_FILESIZE:
-      /*exit code*/
+      f->eax = filesize(*(int *)args[0]);
       break;
     case SYS_READ:
-      /*exit code*/
+      f->eax = read(*(int *)args[0], *(void **)args[1], *(unsigned *)args[2]);
       break;
     case SYS_WRITE:
-      /*halt code*/
+      f->eax = write(*(int *)args[0], *(void **)args[1], *(unsigned *)args[2]);
       break;
     case SYS_SEEK:
-      /*exit code*/
+      seek(*(int *)args[0], *(unsigned *)args[1]);
       break;
     case SYS_TELL:
-      /*exit code*/
+      f->eax = tell(*(int *)args[0]);
       break;
     case SYS_CLOSE:
-      /*exit code*/
+      close(*(int *)args[0]);
       break;
     default:
     }
-
-  thread_exit ();
 }
+
+/*Stops the entire operating system*/
+static void
+halt (void)
+{
+  shutdown_power_off();
+}
+
+
+static void
+exit (int status){
+  
+  printf("%s: exit(%d)\n", thread_current()->name, status);
+
+  thread_exit();
+}
+
+
 
 /* Creates a new file named FILE initially SIZE bytes in size. Returns true if
  * successful, false otherwise. */
@@ -189,7 +209,7 @@ remove (const char *file)
 /* Opens FILE, adds it to the current thread's file descriptor table, and
  * returns its file descriptor. Returns -1 if the file coudldn't be opened or
  * the fd table is full*/
-static bool
+static int
 open (const char *file)
 {
   if (file == NULL)
@@ -205,7 +225,7 @@ open (const char *file)
 
   struct thread *t = thread_current ();
 
-  if (t->next_fd >= 64)
+  if (t->next_fd >= 64 || t->fd_table[t->next_fd] < 2)
     {
       file_close (f);
       return -1;

@@ -165,7 +165,7 @@ page_fault (struct intr_frame *f)
       and freeing memory*/
       return;
    if(user) {
-      //exit(-1);
+      thread_exit ();
       return;
    }
    }
