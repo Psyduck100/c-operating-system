@@ -1,4 +1,13 @@
 #include "userprog/process.h"
+#include <debug.h>
+#include <inttypes.h>
+#include <round.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "userprog/gdt.h"
+#include "userprog/pagedir.h"
+#include "userprog/tss.h"
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
@@ -8,15 +17,6 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
-#include "userprog/gdt.h"
-#include "userprog/pagedir.h"
-#include "userprog/tss.h"
-#include <debug.h>
-#include <inttypes.h>
-#include <round.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 #define MAX_CLA_ITEMS = 4;
 
@@ -68,7 +68,8 @@ tid_t process_execute(const char *file_name)
 
 /* A thread function that loads a user process and starts it
    running. */
-static void start_process(void *file_name_)
+static void
+start_process(void *file_name_)
 {
   char *file_name = file_name_;
   struct intr_frame if_;
@@ -186,7 +187,10 @@ static void start_process(void *file_name_)
 
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
-int process_wait(tid_t child_tid UNUSED) { return -1; }
+int process_wait(tid_t child_tid UNUSED)
+{
+  return -1;
+}
 
 /* Free the current process's resources. */
 void process_exit(void)
@@ -354,10 +358,7 @@ bool load(const char *file_name, void (**eip)(void), void **esp)
   t->running_file = file;
 
   /* Read and verify executable header. */
-  if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr ||
-      memcmp(ehdr.e_ident, "\177ELF\1\1\1", 7) || ehdr.e_type != 2 ||
-      ehdr.e_machine != 3 || ehdr.e_version != 1 ||
-      ehdr.e_phentsize != sizeof(struct Elf32_Phdr) || ehdr.e_phnum > 1024)
+  if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr || memcmp(ehdr.e_ident, "\177ELF\1\1\1", 7) || ehdr.e_type != 2 || ehdr.e_machine != 3 || ehdr.e_version != 1 || ehdr.e_phentsize != sizeof(struct Elf32_Phdr) || ehdr.e_phnum > 1024)
   {
     printf("load: %s: error loading executable\n", file_name);
     goto done;
@@ -402,8 +403,7 @@ bool load(const char *file_name, void (**eip)(void), void **esp)
           /* Normal segment.
              Read initial part from disk and zero the rest. */
           read_bytes = page_offset + phdr.p_filesz;
-          zero_bytes =
-              (ROUND_UP(page_offset + phdr.p_memsz, PGSIZE) - read_bytes);
+          zero_bytes = (ROUND_UP(page_offset + phdr.p_memsz, PGSIZE) - read_bytes);
         }
         else
         {
@@ -412,8 +412,8 @@ bool load(const char *file_name, void (**eip)(void), void **esp)
           read_bytes = 0;
           zero_bytes = ROUND_UP(page_offset + phdr.p_memsz, PGSIZE);
         }
-        if (!load_segment(file, file_page, (void *)mem_page, read_bytes,
-                          zero_bytes, writable))
+        if (!load_segment(file, file_page, (void *)mem_page,
+                          read_bytes, zero_bytes, writable))
           goto done;
       }
       else
@@ -444,7 +444,8 @@ static bool install_page(void *upage, void *kpage, bool writable);
 
 /* Checks whether PHDR describes a valid, loadable segment in
    FILE and returns true if so, false otherwise. */
-static bool validate_segment(const struct Elf32_Phdr *phdr, struct file *file)
+static bool
+validate_segment(const struct Elf32_Phdr *phdr, struct file *file)
 {
   /* p_offset and p_vaddr must have the same page offset. */
   if ((phdr->p_offset & PGMASK) != (phdr->p_vaddr & PGMASK))
@@ -500,9 +501,9 @@ static bool validate_segment(const struct Elf32_Phdr *phdr, struct file *file)
 
    Return true if successful, false if a memory allocation error
    or disk read error occurs. */
-static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
-                         uint32_t read_bytes, uint32_t zero_bytes,
-                         bool writable)
+static bool
+load_segment(struct file *file, off_t ofs, uint8_t *upage,
+             uint32_t read_bytes, uint32_t zero_bytes, bool writable)
 {
   ASSERT((read_bytes + zero_bytes) % PGSIZE == 0);
   ASSERT(pg_ofs(upage) == 0);
@@ -547,7 +548,8 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
-static bool setup_stack(void **esp)
+static bool
+setup_stack(void **esp)
 {
   uint8_t *kpage;
   bool success = false;
@@ -573,12 +575,12 @@ static bool setup_stack(void **esp)
    with palloc_get_page().
    Returns true on success, false if UPAGE is already mapped or
    if memory allocation fails. */
-static bool install_page(void *upage, void *kpage, bool writable)
+static bool
+install_page(void *upage, void *kpage, bool writable)
 {
   struct thread *t = thread_current();
 
   /* Verify that there's not already a page at that virtual
      address, then map our page there. */
-  return (pagedir_get_page(t->pagedir, upage) == NULL &&
-          pagedir_set_page(t->pagedir, upage, kpage, writable));
+  return (pagedir_get_page(t->pagedir, upage) == NULL && pagedir_set_page(t->pagedir, upage, kpage, writable));
 }
