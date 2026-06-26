@@ -5,8 +5,22 @@
 
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
 
 static void syscall_handler (struct intr_frame *);
+static int get_user(const uint8_t *uaddr);
+static bool put_user(uint8_t *udst, uint8_t byte);
+static bool copy_in(void *dst, const void *usrc, size_t size);
+static void halt (void);
+static bool create (const char *file, unsigned initial_size);
+static bool remove (const char *file);
+static bool open (const char *file);
+static int filesize (int fd);
+static int read (int fd, void *buffer, unsigned size);
+static int write (int fd, const void *buffer, unsigned size);
+static void seek (int fd, unsigned position);
+static unsigned tell (int fd);
+static void close (int fd);
 
 void
 syscall_init (void)
@@ -128,7 +142,18 @@ syscall_handler (struct intr_frame *f UNUSED)
 
     case SYS_EXEC:
 
-      /*exit call*/
+      /*get arguments*/
+      int args[1];
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 1);
+
+      /* fix resources and terminate if invalid pointer*/
+      if (success == false)
+      {
+        thread_exit();
+      }
+
+      /*exec call*/
+      f->eax = exec((char*)args[0]);
       break;
 
     case SYS_WAIT:
@@ -136,45 +161,135 @@ syscall_handler (struct intr_frame *f UNUSED)
       break;
     case SYS_CREATE:
       
+      /*get arguments*/
+      int args[2];
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 2);
+
+      /* fix resources and terminate if invalid pointer*/
+      if (success == false)
+      {
+        thread_exit();
+      }
+      
       f->eax = create(*(char **)args[0], *(unsigned *)args[1]);
       break;
 
     case SYS_REMOVE:
+      
+      /*get arguments*/
+      int args[1];
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 1);
+
+      /* fix resources and terminate if invalid pointer*/
+      if (success == false)
+      {
+        thread_exit();
+      }
 
       f->eax = remove(*(char **)args[0]);
       break;
 
     case SYS_OPEN:
+      
+      /*get arguments*/
+      int args[1];
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 1);
+
+      /* fix resources and terminate if invalid pointer*/
+      if (success == false)
+      {
+        thread_exit();
+      }
 
       f->eax = open(*(char **)args[0]);
       break;
 
     case SYS_FILESIZE:
 
+      /*get arguments*/
+      int args[1];
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 1);
+
+      /* fix resources and terminate if invalid pointer*/
+      if (success == false)
+      {
+        thread_exit();
+      }
+
       f->eax = filesize(*(int *)args[0]);
       break;
 
     case SYS_READ:
+
+      /*get arguments*/
+      int args[3];
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 3);
+
+      /* fix resources and terminate if invalid pointer*/
+      if (success == false)
+      {
+        thread_exit();
+      }
 
       f->eax = read(*(int *)args[0], *(void **)args[1], *(unsigned *)args[2]);
       break;
 
     case SYS_WRITE:
 
+      /*get arguments*/
+      int args[3];
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 3);
+
+      /* fix resources and terminate if invalid pointer*/
+      if (success == false)
+      {
+        thread_exit();
+      }
+
       f->eax = write(*(int *)args[0], *(void **)args[1], *(unsigned *)args[2]);
       break;
 
     case SYS_SEEK:
+      
+      /*get arguments*/
+      int args[2];
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 2);
+
+      /* fix resources and terminate if invalid pointer*/
+      if (success == false)
+      {
+        thread_exit();
+      }
 
       seek(*(int *)args[0], *(unsigned *)args[1]);
       break;
 
     case SYS_TELL:
 
+      /*get arguments*/
+      int args[1];
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 1);
+
+      /* fix resources and terminate if invalid pointer*/
+      if (success == false)
+      {
+        thread_exit();
+      }
+
       f->eax = tell(*(int *)args[0]);
       break;
 
     case SYS_CLOSE:
+
+      /*get arguments*/
+      int args[1];
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 1);
+
+      /* fix resources and terminate if invalid pointer*/
+      if (success == false)
+      {
+        thread_exit();
+      }
 
       close(*(int *)args[0]);
       break;
