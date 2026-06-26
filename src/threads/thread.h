@@ -98,7 +98,7 @@ struct thread
 
     struct thread* parent;               /* Pointer to the parent thread/process*/
 
-   int exit_status;
+    int exit_status;
 
     struct list_elem child_elem;         /* List element for a child process.
                                             Can access siblings list*/

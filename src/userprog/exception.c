@@ -158,7 +158,7 @@ page_fault (struct intr_frame *f)
       and go back to get_user() or put_user() they will correctly
       return -1 and false respectively on failure. Then after
       resources are properly sorted the processes can be terminated*/
-      f->eip = f->eax;
+      f->eip = (void *)f->eax;
       f->eax = 0xffffffff;
       
       /*return so we don't kill the process before releasing locks

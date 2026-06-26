@@ -179,6 +179,23 @@ tid_t thread_create(const char *name, int priority,
   init_thread(t, name, priority);
   tid = t->tid = allocate_tid();
 
+  /* Initialize fd  table and reserve fd0 and fd1 for stdin, stdout*/
+  t->fd_table = palloc_get_page(PAL_ZERO);
+  ASSERT(t->fd_table != NULL);
+  t->next_fd = 2;
+  t->running_file = NULL;
+
+  enum intr_level old_level;
+  struct thread *cur_t = thread_current();
+  
+  old_level = intr_disable();
+  /*add new thread as child of current thread*/
+  list_push_back(&cur_t->child_list, &t->child_elem);
+  intr_set_level(old_level);
+
+  /*set parent for new thread*/
+  t->parent = thread_current();
+
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame(t, sizeof *kf);
   kf->eip = NULL;
@@ -449,20 +466,12 @@ init_thread(struct thread *t, const char *name, int priority)
   t->magic = THREAD_MAGIC;
 
 
-   struct thread *cur_t = thread_current();
 
   old_level = intr_disable();
 
   list_push_back(&all_list, &t->allelem);
 
-  /*add new thread as child of current thread*/
-  list_push_back(&cur_t->child_list, &t->child_elem);
-
   intr_set_level(old_level);
-
-
-  /*set parent for new thread*/
-  t->parent = thread_current();
 
   /*initailize to false*/
   t->loaded = false;
@@ -488,13 +497,7 @@ init_thread(struct thread *t, const char *name, int priority)
   
   list_init(&t->child_list);
 
-  /* Initialize fd  table and reserve fd0 and fd1 for stdin, stdout*/
-  t->fd_table = palloc_get_page(PAL_ZERO);
-  ASSERT(t->fd_table != NULL);
-  t->next_fd = 2;
-  t->running_file = NULL;
 }
-
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
    returns a pointer to the frame's base. */
 static void *

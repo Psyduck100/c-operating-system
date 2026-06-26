@@ -67,6 +67,9 @@ struct file *running_file
 -> the file currently running for this thread          
 int next_fd
 -> tracks the next available fd to assign 
+struct semaphore load_sema; In thread.had
+-> A semaphore used to synchronize a parent process when it calls 
+exec for when the child process is done loading
 
 >> B2: Describe how file descriptors are associated with open files.
 >> Are file descriptors unique within the entire OS or just within a
