@@ -98,6 +98,8 @@ struct thread
 
     struct thread* parent;               /* Pointer to the parent thread/process*/
 
+   int exit_status;
+
     struct list_elem child_elem;         /* List element for a child process.
                                             Can access siblings list*/
     struct list child_list ;              /* list of children processes*/
@@ -106,11 +108,17 @@ struct thread
                                             a parent process when it calls 
                                             exec for when the child process 
                                             is done loading*/
-    struct semaphore wait;                /* A semaphore used to synchronize
+    struct semaphore wait_sema;                /* A semaphore used to synchronize
                                              a parent process when it calls
                                              wait for when the child process
                                              exits and parent process can
                                              continue*/
+
+   struct semaphore die_sema; /*A semaphore used synchronize a parent and    child process for when the child can safely die*/
+   
+   bool waited_for; /* A bool to represent if thee thread is being waited on by a parent*/
+
+
     bool loaded;                         /* A bool to represent if the thread
                                             is done loading*/
 

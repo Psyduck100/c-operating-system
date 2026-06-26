@@ -309,10 +309,14 @@ halt (void)
 then exits the thread*/
 static void
 exit (int status){
-  
+  struct thread *t = thread_current();
+  t->exit_status = status;
+
+
   /*prints exit  message*/
   printf("%s: exit(%d)\n", thread_current()->name, status);
-
+  sema_up(&t->wait_sema);
+  sema_down(&t->die_sema);
   thread_exit();
 }
 

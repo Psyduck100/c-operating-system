@@ -224,14 +224,85 @@ start_process(void *file_name_)
    does nothing. */
 int process_wait(tid_t child_tid UNUSED)
 {
-  return -1;
+
+
+  //find child with matching tid 
+  struct thread *t = thread_current();
+  struct thread *child = NULL;
+  struct list_elem *cur_child_elem = list_begin(&t->child_list);
+
+
+  //iterate while its not the tail (sentinel)
+  while (cur_child_elem != list_end(&t->child_list)) {
+    struct thread *cur_t = list_entry(cur_child_elem, struct thread, child_elem);
+
+    if (cur_t->tid == child_tid) {
+      child = cur_t;
+      break;
+    }
+
+    cur_child_elem = list_next(cur_child_elem);
+
+
+  }
+  
+
+
+
+  //handle all the -1 (fail) cases
+    //element not found so child is null
+  if (child == NULL){
+    return -1;
+  }
+
+    //child is already waited for
+  if (child->waited_for){
+    return -1;
+  }
+
+  //set child to be waited on
+  child->waited_for = true;
+
+  //block untill child exits
+  sema_down(&child->wait_sema);
+
+
+  //retrieve child exit status
+  int exit_status = child->exit_status;
+
+
+  //let child die
+  sema_up(&child->die_sema);
+
+  //clean up for child
+  list_remove(&child->child_elem);
+  
+  //return exit status
+  return exit_status;
+
 }
 
 /* Free the current process's resources. */
 void process_exit(void)
 {
   struct thread *cur = thread_current();
+
   uint32_t *pd;
+  struct list_elem *cur_child_elem = list_begin(&cur->child_list);
+
+  // if parent dies abruptly make sure to let children die 
+  while (cur_child_elem != list_end(&cur->child_list)) {
+
+
+    struct thread *child = list_entry(cur_child_elem, struct thread, child_elem);
+
+
+    sema_up(&child->die_sema);
+
+    cur_child_elem = list_next(cur_child_elem);
+  }
+
+
 
   /* Close all open files */
   if (cur->fd_table != NULL)

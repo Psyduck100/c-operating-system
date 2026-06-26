@@ -467,6 +467,10 @@ init_thread(struct thread *t, const char *name, int priority)
   /*initailize to false*/
   t->loaded = false;
 
+  t->waited_for = false;
+  t->exit_status = -1;
+  t -> parent = NULL;
+
   /*for exec() initialize the load_sema to 0 so when parent calls 
   sema_down() parent process will wait until child process is 
   done loading*/
@@ -474,7 +478,15 @@ init_thread(struct thread *t, const char *name, int priority)
 
   /*for wait() initialize the wait semaphore to 0 so when parent calls 
   sema_down() parent process will wait until child process exits*/
-  sema_init(&t->wait, 0); 
+  sema_init(&t->wait_sema, 0); 
+
+  
+  /*for exit() initialize the die semaphore to 0 so when child calls 
+  sema_down() child process will wait until parent process reads exit status*/
+  sema_init(&t->die_sema, 0);
+
+  
+  list_init(&t->child_list);
 
   /* Initialize fd  table and reserve fd0 and fd1 for stdin, stdout*/
   t->fd_table = palloc_get_page(PAL_ZERO);
