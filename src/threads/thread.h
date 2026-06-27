@@ -119,8 +119,8 @@ struct thread
    bool waited_for; /* A bool to represent if thee thread is being waited on by a parent*/
 
 
-    bool loaded;                         /* A bool to represent if the thread
-                                            is done loading*/
+   bool loaded;                         /* A bool to represent if the thread
+                                            successfully loaded*/
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */

@@ -29,7 +29,6 @@ FirstName LastName <email@domain.example>
 >> A1: Copy here the declaration of each new or changed `struct' or
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
- 
 
 ---- ALGORITHMS ----
 
@@ -62,14 +61,34 @@ where multiple threads may be tokenizing strings at the same time.
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
 struct file **fd_table
--> array of open files for this thread, indexed by file descriptor (fd)    
+-> array of open files for this thread, indexed by file descriptor (fd)   
+
 struct file *running_file
--> the file currently running for this thread          
+-> the file currently running for this thread
+
 int next_fd
 -> tracks the next available fd to assign 
-struct semaphore load_sema; In thread.had
+
+struct semaphore load_sema; In thread.h for struct thread
 -> A semaphore used to synchronize a parent process when it calls 
-exec for when the child process is done loading
+   exec for when the child process is done loading
+
+bool loaded; In thread.h for struct thread
+-> A bool for the exec syscall to represent if a child process had their
+   executable successfully loaded or not
+
+struct thread* parent; In thread.h for struct thread
+-> The parent process that created the child procecss/thread
+
+struct list child_list ; In thread.h for struct thread
+-> A list of child processes for the current process/thread.
+   Used to help lookup child processes in exec and wait syscalls.
+
+struct list_elem child_elem; In thread.h for struct thread
+-> The list_elem that allows a child process/thread to be
+   inserted into its parent's child_list. Can also be used to 
+   view siblings.
+
 
 >> B2: Describe how file descriptors are associated with open files.
 >> Are file descriptors unique within the entire OS or just within a
@@ -112,12 +131,107 @@ files.
 >> paragraphs, describe the strategy or strategies you adopted for
 >> managing these issues.  Give an example.
 
+
+We handle invalid pointers by checking all pointers before
+they are used by the kernel for syscalls. To manage these invalid 
+pointer issues we ended up using method 2 from the documentation of 
+checking that a user pointer points below PHYS_BASE 
+(so pointer isn't in kernel virtual address space) and isn't NULL, 
+then dereferencing it to have a page fault occur in the case 
+of an invalid pointer (that wasn't already checked).
+
+However, we also had to keep in mind about freeing resources so
+we implemented the get_user function to help. Without get_user when we
+dereference the pointer there's no way to return an error code from 
+a memory access. 
+
+To use get_user, in page_fault when we are in kernel mode 
+we made sure to set f->eip = (void *)f->eax and f->eax = 0xffffffff; then 
+return to get_user. We made sure to return so that page_fault wouldn't kill
+the process without freeing the resources. Also get_user assumes we have 
+modified page fault as so. This is so that when we return to get_user from 
+page fault setting the next instruction pointer f->eip to (void *)f->eax 
+will make get_user skip the memory  access that caused the page fault so 
+it will not infinitely page fault. And set f->eax = 0xffffffff; so get_user 
+will return -1. 
+
+Our strategy involved using get_user in many functions. And 
+when get_user returned -1 that would  mean the pointer is invalid and as 
+such we need to terminate the offending process and free its resources. 
+To do all of this we just need to call exit(-1). This will call
+thread_exit which also calls process_exit. All of these functions 
+already help us clean up all of our resources by our design. They 
+close any open files, release any necessary locks, dealloacte
+memory, make files writeable, and etc to clean up all resources.
+
+We used the method 2 strategy for checking all pointers including
+the inital stack pointer, all the pointers for the three arguments,
+all file pointers for file syscalls, and the pointer for exec's
+commandline. 
+
+To also best avoid obscuring the primary function of code in a morass 
+of error-handling we created helper functions to do the checking for
+us. One such example is the static bool copy_in (void *dst_, 
+const void *usrc_, size_t size) function. We use this function to
+validate pointers for the stackpointer which holds the syscall number
+and for all arguments of any syscall. The copy_in function also 
+has the number of bytes to check for invalid pointers as a 
+paramter so we can use it to check all arguments of all syscalls.
+
+We also have a function to check an arbitrary pointer to see
+if its valid or not called check_pointer and a function to check
+buffers of any size called check_buffer. check_pointer uses the 
+same get_user method, and check_buffer uses check_pointer, on 
+every byte in the buffer's size to check the entire buffer.
+
+For an example of what we validate for a write syscall. We first 
+use copy_in to validate the syscall_number and the 3 argumnets. 
+Then we use check_buffer for the write buffer. These 3 functions 
+all use get_user so if one of the pointers was invalid the 
+process would terminate and through exit would clean up all its 
+resources.
+
+
 ---- SYNCHRONIZATION ----
 
 >> B7: The "exec" system call returns -1 if loading the new executable
 >> fails, so it cannot return before the new executable has completed
 >> loading.  How does your code ensure this?  How is the load
 >> success/failure status passed back to the thread that calls "exec"?
+
+To do this we have a semaphore load_sema and a bool value called loaded 
+for each thread. When a parent does an exec system call. Exec will call
+process_execute. In process execute the parent thread calls
+tid = thread_create(prog_name, PRI_DEFAULT, start_process, fn_copy2);
+
+When the thread is created the child thread is added to the parent
+threads child_list and the child thread will have its load_sema 
+initialized to 0. And after the thread is created start_process 
+is called which calls load. 
+
+We want the parent thread to wait for the new executable to finish
+loading so in process_execute after we call thread_create we look for the 
+child thread by iterating through the parent/current processes child
+list and do sema_down on the child threads load_sema. 
+
+Since load sema is initialized to 0 the parent doing sema_down on the 
+child's load_sema will make the parent wait until the child calls 
+sema_up on their own load sema. We make sure this only happens after the 
+child finishes loading the executable in start-process.
+
+And when the child finishes loading and calling sema_up on their 
+load sema we store whether the loading was successful or not 
+in the childs loaded variable.
+
+So, only after the child tries loading the new executable and calling
+sema_up on their load_sema, then the parent process acquires the load_sema 
+and stops waiting.
+
+The parent process that called exec can then check 
+the loaded varaible of the child thread (which we already previously 
+gotten) to see if the load was a success or failure and return
+the child processes pid or -1 respectively.
+
 
 >> B8: Consider parent process P with child process C.  How do you
 >> ensure proper synchronization and avoid race conditions when P

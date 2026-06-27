@@ -304,13 +304,11 @@ void process_exit(void)
 
     struct thread *child = list_entry(cur_child_elem, struct thread, child_elem);
 
+    cur_child_elem = list_next(cur_child_elem);
 
     sema_up(&child->die_sema);
 
-    cur_child_elem = list_next(cur_child_elem);
   }
-
-
 
   /* Close all open files */
   if (cur->fd_table != NULL)
@@ -328,13 +326,14 @@ void process_exit(void)
     palloc_free_page(cur->fd_table);
   }
 
-  /* When file is done execing, make it writable again*/
+  /* When file is done execing, make its file writable again*/
   if (cur->running_file != NULL)
   {
-    lock_acquire(&filesys_lock);
-    file_close(cur->running_file);
-    cur->running_file = NULL;
-    lock_release(&filesys_lock);
+      struct file *f = cur->running_file;
+      cur->running_file = NULL;
+      lock_acquire (&filesys_lock);
+      file_close (f);
+      lock_release (&filesys_lock);
   }
 
   /* Destroy the current process's page directory and switch back
@@ -550,7 +549,7 @@ done:
     if (file != NULL){
       file_close(file);
     }
-    thread_current()->running_file = NULL;
+    t->running_file = NULL;
   }
 
   return success;

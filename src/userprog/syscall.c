@@ -61,43 +61,45 @@ get_file (int fd)
   return t->fd_table[fd];
 }
 
-/* sets byte to the user address of udst. Returns true if successful
-and false if an error occured such as an invalid pointer*/
-// static bool
-// set_value(uint8_t *udst, uint8_t byte) {
-//   /*checks if udst (user pointer) is null or points below PHYS_BASE*/
-//   if (udst == NULL || udst >= (uint8_t *)PHYS_BASE)
-//     {
-//       return false;
-//     }
-
-//   bool success = put_user(udst, byte);
-//    /*checks if put_user had a segfault*/
-//   if (success == false)
-//     {
-//       return false;
-//     }
-
-//   return true;
-// }
-
-/*checks if the file pointer is valid. Returns false if invalid
+/*checks if a pointer is valid. Returns false if invalid
   and true otherwise*/
 static bool
-check_file_pointer (const char *file)
+check_pointer (const uint8_t *pointer)
 {
-  /*checks if file pointer is null or points below PHYS_BASE*/
-  if (file == NULL || file >= (const char *)PHYS_BASE)
+  /*checks if pointer is null or points below PHYS_BASE*/
+  if (pointer == NULL || pointer >= (const uint8_t *)PHYS_BASE)
     {
       return false;
     }
 
-  int success = get_user ((const uint8_t *)file);
+  int success = get_user ((const uint8_t *)pointer);
   /*checks if get_user had a segfault*/
   if (success == -1)
     {
       return false;
     }
+
+  return true;
+}
+
+/*checks if a buffer is valid. Returns false if invalid
+  and true otherwise*/
+static bool
+check_buffer (const uint8_t *buffer, size_t size)
+{
+
+  const uint8_t *ptr = buffer;
+
+  if (buffer == NULL){
+    return false;
+  }
+  
+  for (size_t i = 0; i < size; i++){
+    bool valid = check_pointer(ptr + i);
+    if (valid == false){
+      return false;
+    }
+  }
 
   return true;
 }
@@ -111,15 +113,17 @@ copy_in (void *dst_, const void *usrc_, size_t size)
   uint8_t *dst = dst_;
   const uint8_t *usrc = usrc_;
 
-  /*checks if usrc (user pointer) is null or points below PHYS_BASE*/
-  if (usrc == NULL || usrc >= (uint8_t *)PHYS_BASE)
-    {
-      return false;
-    }
 
   /*byte by byte copies usrc to dst using get_user*/
   for (size_t i = 0; i < size; i++)
     {
+
+      /*checks if usrc (user pointer) is null or points below PHYS_BASE*/
+      if (usrc == NULL || usrc >= (uint8_t *)PHYS_BASE)
+      {
+        return false;
+      }
+
       int byte_value = get_user (usrc);
 
       /*checks if get_user had a segfault*/
@@ -171,7 +175,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
       if (!success)
         exit(-1);
-      if (!check_file_pointer ((char *)args[0]))
+      if (!check_pointer ((uint8_t *)args[0]))
         exit(-1);
       f->eax = exec ((char *)args[0]);
       break;
@@ -187,7 +191,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 2);
       if (!success)
         exit(-1);
-      if (!check_file_pointer ((char *)args[0]))
+      if (!check_pointer ((uint8_t *)args[0]))
         exit(-1);
       f->eax = create ((char *)args[0], (unsigned)args[1]);
       break;
@@ -196,7 +200,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
       if (!success)
         exit(-1);
-      if (!check_file_pointer ((char *)args[0]))
+      if (!check_pointer ((uint8_t *)args[0]))
         exit(-1);
       f->eax = remove ((char *)args[0]);
       break;
@@ -205,7 +209,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
       if (!success)
         exit(-1);
-      if (!check_file_pointer ((char *)args[0]))
+      if (!check_pointer ((uint8_t *)args[0]))
         exit(-1);
       f->eax = open ((char *)args[0]);
       break;
@@ -221,7 +225,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 3);
       if (!success)
         exit(-1);
-      if (!check_file_pointer ((char *)args[1]))
+      if (!check_buffer ((uint8_t *)args[1], (size_t)args[2]))
         exit(-1);
       f->eax = read (args[0], (void *)args[1], (unsigned)args[2]);
       break;
@@ -230,7 +234,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 3);
       if (!success)
         exit(-1);
-      if (!check_file_pointer ((char *)args[1]))
+      if (!check_buffer ((uint8_t *)args[1], (size_t)args[2]))
         exit(-1);
       f->eax = write (args[0], (void *)args[1], (unsigned)args[2]);
       break;
@@ -276,6 +280,20 @@ exit (int status)
 {
   struct thread *t = thread_current ();
   t->exit_status = status;
+
+
+  /* Our die_sema makes it so that child threads don't call thread_exit()
+    until the parent thread is exited. However, we still need to treat
+    this current child thread as dead and as such need to make its file 
+    writable again*/
+  if (t->running_file != NULL)
+  {
+    struct file *f = t->running_file;
+    t->running_file = NULL;
+    lock_acquire (&filesys_lock);
+    file_close (f);
+    lock_release (&filesys_lock);
+  }
 
   /*prints exit  message*/
   printf ("%s: exit(%d)\n", thread_current ()->name, status);
@@ -343,7 +361,7 @@ static int
 open (const char *file)
 {
   if (file == NULL)
-    return false;
+    return -1;
 
   /* Acquire the global lock to avoid race conditions */
   lock_acquire (&filesys_lock);
@@ -483,9 +501,10 @@ close (int fd)
   if (f == NULL)
     return;
 
+  thread_current ()->fd_table[fd] = NULL;
+
   /* Acquire the global lock to avoid race conditions */
   lock_acquire (&filesys_lock);
   file_close (f);
   lock_release (&filesys_lock);
-  thread_current ()->fd_table[fd] = NULL;
 }
