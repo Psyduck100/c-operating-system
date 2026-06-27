@@ -114,6 +114,23 @@ files.
 >> for a system call that only copies 2 bytes of data?  Is there room
 >> for improvement in these numbers, and how much?
 
+If a full page of data is copied from user space into the kernel, the least
+number of inspections of the page table would be 1 (if the data starts at
+the beginning of a page boundary). The greatest number of inspections 
+would be 2 if the data starts in the middle or just not at the start 
+of the page, therefore it spans 2 pages and would need 2 inspections.
+
+For a system that only copies 2 bytes of data, the least number of 
+inspections would still be 1 in the case that both bytes are on the same 
+page. The greatest number of inspections would still be 2 in the case that
+the first byte is the last byte of one page and the second byte if the first
+byte the next page.
+
+For the theoretical min/max of 1/2 inspections for the best/worst cases,
+there is no room for improvement as 1 inspection is the lowest as at 
+least 1 inspection is required to check if the ptr is valid and 2
+inspections for the case described above is unavoidable.
+
 >> B5: Briefly describe your implementation of the "wait" system call
 >> and how it interacts with process termination.
 
