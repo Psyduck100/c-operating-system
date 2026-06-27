@@ -151,7 +151,7 @@ page_fault (struct intr_frame *f)
 
    /*For method 2 of making sure invalid pointers must be rejected 
    without harm to the kernel or other running processes,*/
-   if (user) {
+   if (user == false) {
 
       /*This is to make sure that we don't leak resources
       when checking for invalid pointers. After doing get_user
@@ -168,6 +168,10 @@ page_fault (struct intr_frame *f)
       
       /*return so we don't kill the process before releasing locks
       and freeing memory*/
+      return;
+   }
+   if (user == true) {
+      thread_exit();
       return;
    }
 

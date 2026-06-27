@@ -108,7 +108,7 @@ check_file_pointer (const char *file)
     }
 
   int success = get_user ((const uint8_t *)file);
-  /*checks if put_user had a segfault*/
+  /*checks if get_user had a segfault*/
   if (success == -1)
     {
       return false;
@@ -162,7 +162,6 @@ syscall_handler (struct intr_frame *f UNUSED)
 
   /*get system call number*/
   bool success = copy_in (&syscall_number, f->esp, sizeof syscall_number);
-  printf ("%d", syscall_number);
 
   if (success == false)
     {
