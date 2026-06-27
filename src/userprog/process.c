@@ -60,11 +60,12 @@ tid_t process_execute(const char *file_name)
   char *prog_name = strtok_r(fn_copy, " ", &save_ptr);
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create(prog_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create(prog_name, PRI_DEFAULT, start_process, fn_copy2);
 
   struct thread *cur_t = thread_current();
   struct thread *found_child = NULL;
   struct list_elem *cur_child ;
+
 
   /* find child process to sema down on its semaphore so parent process 
   will wait for child to load and sema up before continuing*/
@@ -75,7 +76,8 @@ tid_t process_execute(const char *file_name)
                                            child_elem);
       if (child_t->tid == tid) {
         found_child = child_t;
-        sema_down(&child_t->load_sema);
+        sema_down(&found_child->load_sema);
+        break;
       }
     }
   
@@ -86,7 +88,7 @@ tid_t process_execute(const char *file_name)
   }
 
 
-  palloc_free_page(fn_copy2);
+  //palloc_free_page(fn_copy2);
   if (tid == TID_ERROR)
     palloc_free_page(fn_copy);
   return tid;
@@ -109,6 +111,11 @@ start_process(void *file_name_)
     thread_exit();
   strlcpy(fn_copy, file_name, PGSIZE);
   char *prog_name = strtok_r(fn_copy, " ", &save_ptr2);
+
+  char *cmd_copy = palloc_get_page(0);
+  if (cmd_copy == NULL)
+    thread_exit();
+  strlcpy(cmd_copy, file_name, PGSIZE);
 
   /* Initialize interrupt frame and load executable. */
   memset(&if_, 0, sizeof if_);
@@ -135,6 +142,7 @@ start_process(void *file_name_)
   if (!success)
   {
     palloc_free_page(file_name);
+    palloc_free_page(cmd_copy);
     thread_exit();
   }
 
@@ -151,7 +159,7 @@ start_process(void *file_name_)
     int argc = 0;
     char *argv[MAX_CLA_ITEMS + 1];
 
-    token = strtok_r(file_name, " ", &saveptr);
+    token = strtok_r(cmd_copy, " ", &saveptr);
 
     // Parse the CLA
     while (token != NULL)
@@ -209,6 +217,7 @@ start_process(void *file_name_)
   }
 
   palloc_free_page(file_name);
+  palloc_free_page(cmd_copy);
   asm volatile("movl %0, %%esp; jmp intr_exit" : : "g"(&if_) : "memory");
   NOT_REACHED();
 }
@@ -245,9 +254,6 @@ int process_wait(tid_t child_tid UNUSED)
 
 
   }
-  
-
-
 
   //handle all the -1 (fail) cases
     //element not found so child is null

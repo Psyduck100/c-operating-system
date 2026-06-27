@@ -1,21 +1,21 @@
 #include "userprog/syscall.h"
 
-#include <stdio.h>
-#include <syscall-nr.h>
+#include "devices/input.h"
 #include "devices/shutdown.h"
+#include "filesys/file.h"
+#include "filesys/filesys.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/process.h"
-#include "filesys/filesys.h"
-#include "devices/input.h"
-#include "filesys/filesys.h"
-#include "filesys/file.h"
+#include <stdio.h>
+#include <syscall-nr.h>
+
 
 static void syscall_handler (struct intr_frame *);
-static int get_user(const uint8_t *uaddr);
-//static bool put_user(uint8_t *udst, uint8_t byte);
-static bool copy_in(void *dst, const void *usrc, size_t size);
+static int get_user (const uint8_t *uaddr);
+// static bool put_user(uint8_t *udst, uint8_t byte);
+static bool copy_in (void *dst, const void *usrc, size_t size);
 static void halt (void);
 static bool create (const char *file, unsigned initial_size);
 static bool remove (const char *file);
@@ -54,7 +54,7 @@ get_user (const uint8_t *uaddr)
 /* Writes BYTE to user address UDST.
    UDST must be below PHYS_BASE.
    Returns true if successful, false if a segfault occurred. */
-// static bool 
+// static bool
 // put_user (uint8_t *udst, uint8_t byte)
 // {
 //   int error_code;
@@ -85,37 +85,37 @@ and false if an error occured such as an invalid pointer*/
 //     {
 //       return false;
 //     }
-  
+
 //   bool success = put_user(udst, byte);
 //    /*checks if put_user had a segfault*/
 //   if (success == false)
 //     {
 //       return false;
 //     }
-  
+
 //   return true;
 // }
 
 /*checks if the file pointer is valid. Returns false if invalid
   and true otherwise*/
-static bool 
-check_file_pointer(const char *file){
+static bool
+check_file_pointer (const char *file)
+{
   /*checks if file pointer is null or points below PHYS_BASE*/
   if (file == NULL || file >= (const char *)PHYS_BASE)
     {
       return false;
     }
-  
-  int success = get_user((const uint8_t *)file);
-   /*checks if put_user had a segfault*/
+
+  int success = get_user ((const uint8_t *)file);
+  /*checks if put_user had a segfault*/
   if (success == -1)
     {
       return false;
     }
-  
+
   return true;
 }
-
 
 /*Copies size bytes from usrc into dst. Makes sure to check if any
   pointers are invalid and if so returns false. Else returns True.*/
@@ -162,223 +162,119 @@ syscall_handler (struct intr_frame *f UNUSED)
 
   /*get system call number*/
   bool success = copy_in (&syscall_number, f->esp, sizeof syscall_number);
+  printf ("%d", syscall_number);
 
   if (success == false)
     {
       /* fix resources and termiante*/
-      thread_exit();
+      exit(-1);
     }
 
   switch (syscall_number)
     {
     case SYS_HALT:
       /*call halt*/
-      halt();
+      halt ();
       break;
 
     case SYS_EXIT:
-
-      /*get arguments*/
-      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 1);
-
-      /* fix resources and terminate if invalid pointer*/
-      if (success == false)
-      {
-        thread_exit();
-      }
-
-      /*call exit*/
-      exit((int)args[0]);
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
+      if (!success)
+        exit(-1);
+      exit (args[0]);
       break;
 
     case SYS_EXEC:
-
-      /*get arguments*/
-      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 1);
-
-      /* fix resources and terminate if invalid pointer*/
-      if (success == false)
-      {
-        thread_exit();
-      }
-      
-      /* fix resources and terminate if invalid pointer*/
-      if (check_file_pointer(*(char **)args[0]) == false){
-        thread_exit();
-      }
-
-      /*exec call*/
-      f->eax = exec((char*)args[0]);
-
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
+      if (!success)
+        exit(-1);
+      if (!check_file_pointer ((char *)args[0]))
+        exit(-1);
+      f->eax = exec ((char *)args[0]);
       break;
 
     case SYS_WAIT:
-      /*wait call*/
-      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 1);
-
-      /* fix resources and terminate if invalid pointer*/
-      if (success == false)
-      {
-        thread_exit();
-      }
-
-      /*exec call*/
-      f->eax = wait((pid_t)args[0]);
-
-
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
+      if (!success)
+        exit(-1);
+      f->eax = wait ((pid_t)args[0]);
       break;
+
     case SYS_CREATE:
-      
-      /*get arguments*/
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 2);
-
-      /* fix resources and terminate if invalid pointer*/
-      if (success == false)
-      {
-        thread_exit();
-      }
-      
-      if (check_file_pointer(*(char **)args[0]) == false){
-        /* fix resources and terminate if invalid pointer*/
-        thread_exit();
-      }
-
-      f->eax = create(*(char **)args[0], *(unsigned *)args[1]);
+      if (!success)
+        exit(-1);
+      if (!check_file_pointer ((char *)args[0]))
+        exit(-1);
+      f->eax = create ((char *)args[0], (unsigned)args[1]);
       break;
 
     case SYS_REMOVE:
-      
-      /*get arguments*/
-      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 1);
-
-      /* fix resources and terminate if invalid pointer*/
-      if (success == false)
-      {
-        thread_exit();
-      }
-
-      /* fix resources and terminate if invalid pointer*/
-      if (check_file_pointer(*(char **)args[0]) == false){
-        thread_exit();
-      }
-
-      f->eax = remove(*(char **)args[0]);
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
+      if (!success)
+        exit(-1);
+      if (!check_file_pointer ((char *)args[0]))
+        exit(-1);
+      f->eax = remove ((char *)args[0]);
       break;
 
     case SYS_OPEN:
-      
-      /*get arguments*/
-      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 1);
-
-      /* fix resources and terminate if invalid pointer*/
-      if (success == false)
-      {
-        thread_exit();
-      }
-      
-      /* fix resources and terminate if invalid pointer*/
-      if (check_file_pointer(*(char **)args[0]) == false){
-        thread_exit();
-      }
-
-      f->eax = open(*(char **)args[0]);
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
+      if (!success)
+        exit(-1);
+      if (!check_file_pointer ((char *)args[0]))
+        exit(-1);
+      f->eax = open ((char *)args[0]);
       break;
 
     case SYS_FILESIZE:
-
-      /*get arguments*/
-      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 1);
-
-      /* fix resources and terminate if invalid pointer*/
-      if (success == false)
-      {
-        thread_exit();
-      }
-
-      f->eax = filesize(*(int *)args[0]);
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
+      if (!success)
+        exit(-1);
+      f->eax = filesize (args[0]);
       break;
 
     case SYS_READ:
-
-      /*get arguments*/
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 3);
-
-      /* fix resources and terminate if invalid pointer*/
-      if (success == false)
-      {
-        thread_exit();
-      }
-
-      /* fix resources and terminate if invalid pointer*/
-      if (check_file_pointer(*(char **)args[1]) == false){
-        thread_exit();
-      }
-      f->eax = read(*(int *)args[0], *(void **)args[1], *(unsigned *)args[2]);
+      if (!success)
+        exit(-1);
+      if (!check_file_pointer ((char *)args[1]))
+        exit(-1);
+      f->eax = read (args[0], (void *)args[1], (unsigned)args[2]);
       break;
 
     case SYS_WRITE:
-
-      /*get arguments*/
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 3);
-
-      /* fix resources and terminate if invalid pointer*/
-      if (success == false)
-      {
-        thread_exit();
-      }
-
-      /* fix resources and terminate if invalid pointer*/
-      if (check_file_pointer(*(char **)args[1]) == false){
-        thread_exit();
-      }
-
-      f->eax = write(*(int *)args[0], *(void **)args[1], *(unsigned *)args[2]);
+      if (!success)
+        exit(-1);
+      if (!check_file_pointer ((char *)args[1]))
+        exit(-1);
+      f->eax = write (args[0], (void *)args[1], (unsigned)args[2]);
       break;
 
     case SYS_SEEK:
-      
-      /*get arguments*/
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 2);
-
-      /* fix resources and terminate if invalid pointer*/
-      if (success == false)
-      {
-        thread_exit();
-      }
-
-      seek(*(int *)args[0], *(unsigned *)args[1]);
+      if (!success)
+        exit(-1);
+      seek (args[0], (unsigned)args[1]);
       break;
 
     case SYS_TELL:
-
-      /*get arguments*/
-      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 1);
-
-      /* fix resources and terminate if invalid pointer*/
-      if (success == false)
-      {
-        thread_exit();
-      }
-
-      f->eax = tell(*(int *)args[0]);
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
+      if (!success)
+        exit(-1);
+      f->eax = tell (args[0]);
       break;
 
     case SYS_CLOSE:
-
-      /*get arguments*/
-      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 1);
-
-      /* fix resources and terminate if invalid pointer*/
-      if (success == false)
-      {
-        thread_exit();
-      }
-
-      close(*(int *)args[0]);
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
+      if (!success)
+        exit(-1);
+      close (args[0]);
       break;
 
     default:
-      thread_exit ();
+      exit(-1);
       break;
     }
 }
@@ -387,44 +283,46 @@ syscall_handler (struct intr_frame *f UNUSED)
 static void
 halt (void)
 {
-  shutdown_power_off();
+  shutdown_power_off ();
 }
 
 /*Prints an exit message with the processes name and the exit status
 then exits the thread*/
 static void
-exit (int status){
-  struct thread *t = thread_current();
+exit (int status)
+{
+  struct thread *t = thread_current ();
   t->exit_status = status;
 
-
   /*prints exit  message*/
-  printf("%s: exit(%d)\n", thread_current()->name, status);
-  sema_up(&t->wait_sema);
-  sema_down(&t->die_sema);
-  thread_exit();
+  printf ("%s: exit(%d)\n", thread_current ()->name, status);
+  sema_up (&t->wait_sema);
+  sema_down (&t->die_sema);
+  thread_exit ();
 }
 
 /* Creates and executes a new child process from cmdline. The parent
- process will wait until the child process is finished loading 
+ process will wait until the child process is finished loading
  before continuing. Returns tid of child process on success and
  -1 on failure*/
-static pid_t 
-exec(const char *cmdline){
-  tid_t tid = process_execute(cmdline);
+static pid_t
+exec (const char *cmdline)
+{
+  tid_t tid = process_execute (cmdline);
 
-  if (tid == TID_ERROR){
-    return -1;
-  }
+  if (tid == TID_ERROR)
+    {
+      return -1;
+    }
 
   return tid;
 }
 
 static int
-wait(pid_t pid){
-  return process_wait(pid);
+wait (pid_t pid)
+{
+  return process_wait (pid);
 }
-
 
 /* Creates a new file named FILE initially SIZE bytes in size. Returns true if
  * successful, false otherwise. */
@@ -474,15 +372,17 @@ open (const char *file)
 
   struct thread *t = thread_current ();
 
-  for(int i = 2; i < 64; i++) {
-    if(t->fd_table[i] == NULL) {
-      t->fd_table[i] = f;
-      return i;
+  for (int i = 2; i < 64; i++)
+    {
+      if (t->fd_table[i] == NULL)
+        {
+          t->fd_table[i] = f;
+          return i;
+        }
     }
-  }
 
-  t->fd_table[t->next_fd] = f;
-  return t->next_fd++;
+  file_close(f);
+  return -1;
 }
 
 /* Reads SIZE bytes from the file at FD into BUFFER, or reading from stdin if

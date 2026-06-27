@@ -188,13 +188,14 @@ tid_t thread_create(const char *name, int priority,
   enum intr_level old_level;
   struct thread *cur_t = thread_current();
   
+  /*set parent for new thread*/
+  t->parent = cur_t;
+
   old_level = intr_disable();
   /*add new thread as child of current thread*/
   list_push_back(&cur_t->child_list, &t->child_elem);
   intr_set_level(old_level);
 
-  /*set parent for new thread*/
-  t->parent = thread_current();
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame(t, sizeof *kf);
@@ -465,8 +466,6 @@ init_thread(struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->magic = THREAD_MAGIC;
 
-
-
   old_level = intr_disable();
 
   list_push_back(&all_list, &t->allelem);
@@ -478,7 +477,6 @@ init_thread(struct thread *t, const char *name, int priority)
 
   t->waited_for = false;
   t->exit_status = -1;
-  t -> parent = NULL;
 
   /*for exec() initialize the load_sema to 0 so when parent calls 
   sema_down() parent process will wait until child process is 
