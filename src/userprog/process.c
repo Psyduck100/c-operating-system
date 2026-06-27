@@ -59,8 +59,19 @@ tid_t process_execute(const char *file_name)
      instead of the whole line */
   char *prog_name = strtok_r(fn_copy, " ", &save_ptr);
 
+
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create(prog_name, PRI_DEFAULT, start_process, fn_copy2);
+
+
+  palloc_free_page(fn_copy);
+
+
+  if (tid == TID_ERROR) {
+      palloc_free_page(fn_copy2);  
+      return TID_ERROR;
+  }
+
 
   struct thread *cur_t = thread_current();
   struct thread *found_child = NULL;
@@ -87,10 +98,9 @@ tid_t process_execute(const char *file_name)
     tid = TID_ERROR;
   }
 
-  if (tid == TID_ERROR)
-    palloc_free_page(fn_copy);
   return tid;
 }
+
 
 /* A thread function that loads a user process and starts it
    running. */
@@ -109,11 +119,6 @@ start_process(void *file_name_)
     thread_exit();
   strlcpy(fn_copy, file_name, PGSIZE);
   char *prog_name = strtok_r(fn_copy, " ", &save_ptr2);
-
-  char *cmd_copy = palloc_get_page(0);
-  if (cmd_copy == NULL)
-    thread_exit();
-  strlcpy(cmd_copy, file_name, PGSIZE);
 
   /* Initialize interrupt frame and load executable. */
   memset(&if_, 0, sizeof if_);
@@ -140,7 +145,6 @@ start_process(void *file_name_)
   if (!success)
   {
     palloc_free_page(file_name);
-    palloc_free_page(cmd_copy);
     thread_exit();
   }
 
@@ -157,7 +161,7 @@ start_process(void *file_name_)
     int argc = 0;
     char *argv[MAX_CLA_ITEMS + 1];
 
-    token = strtok_r(cmd_copy, " ", &saveptr);
+    token = strtok_r(file_name, " ", &saveptr);
 
     // Parse the CLA
     while (token != NULL)
@@ -215,7 +219,6 @@ start_process(void *file_name_)
   }
 
   palloc_free_page(file_name);
-  palloc_free_page(cmd_copy);
   asm volatile("movl %0, %%esp; jmp intr_exit" : : "g"(&if_) : "memory");
   NOT_REACHED();
 }

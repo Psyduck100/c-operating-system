@@ -181,7 +181,12 @@ tid_t thread_create(const char *name, int priority,
 
   /* Initialize fd  table and reserve fd0 and fd1 for stdin, stdout*/
   t->fd_table = palloc_get_page(PAL_ZERO);
-  ASSERT(t->fd_table != NULL);
+  if (t->fd_table == NULL) {
+    list_remove(&t->child_elem);  
+    palloc_free_page(t);          
+    return TID_ERROR;             
+  }
+
   t->next_fd = 2;
   t->running_file = NULL;
 
@@ -217,7 +222,6 @@ tid_t thread_create(const char *name, int priority,
 
   return tid;
 }
-
 /* Puts the current thread to sleep.  It will not be scheduled
    again until awoken by thread_unblock().
 

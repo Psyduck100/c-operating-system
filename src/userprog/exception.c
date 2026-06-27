@@ -4,6 +4,8 @@
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
+#include "userprog/syscall.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -151,7 +153,7 @@ page_fault (struct intr_frame *f)
 
    /*For method 2 of making sure invalid pointers must be rejected 
    without harm to the kernel or other running processes,*/
-   if (user == false) {
+   if (user == false && fault_addr < PHYS_BASE) {
 
       /*This is to make sure that we don't leak resources
       when checking for invalid pointers. After doing get_user
@@ -170,8 +172,9 @@ page_fault (struct intr_frame *f)
       and freeing memory*/
       return;
    }
+
    if (user == true) {
-      thread_exit();
+      exit(-1);
       return;
    }
 
