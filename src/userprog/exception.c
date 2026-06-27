@@ -172,7 +172,6 @@ page_fault (struct intr_frame *f)
       and freeing memory*/
       return;
    }
-
    if (user == true) {
       exit(-1);
       return;
