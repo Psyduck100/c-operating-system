@@ -19,7 +19,7 @@
 #include "threads/vaddr.h"
 #include "userprog/syscall.h"
 
-#define MAX_CLA_ITEMS 4
+#define MAX_CLA_ITEMS 64
 
 static thread_func start_process NO_RETURN;
 static bool load(const char *cmdline, void (**eip)(void), void **esp);
@@ -128,10 +128,8 @@ start_process(void *file_name_)
 
   success = load(prog_name, &if_.eip, &if_.esp);
 
-
   // Free copy
   palloc_free_page(fn_copy);
-
 
   /*current thread is the child thread from thread exec*/
   struct thread *cur_t = thread_current();
@@ -156,10 +154,12 @@ start_process(void *file_name_)
      and jump to it. */
   if (success)
   {
+
     char *saveptr;
     char *token;
     int argc = 0;
     char *argv[MAX_CLA_ITEMS + 1];
+
 
     token = strtok_r(file_name, " ", &saveptr);
 
@@ -219,6 +219,7 @@ start_process(void *file_name_)
   }
 
   palloc_free_page(file_name);
+
   asm volatile("movl %0, %%esp; jmp intr_exit" : : "g"(&if_) : "memory");
   NOT_REACHED();
 }
@@ -331,7 +332,6 @@ void process_exit(void)
   if (cur->running_file != NULL)
   {
     lock_acquire(&filesys_lock);
-    file_allow_write(cur->running_file);
     file_close(cur->running_file);
     cur->running_file = NULL;
     lock_release(&filesys_lock);
@@ -546,8 +546,13 @@ bool load(const char *file_name, void (**eip)(void), void **esp)
 
 done:
   /* We arrive here whether the load is successful or not. */
-  if (!success && file != NULL)
-    file_close(file);
+  if (!success){
+    if (file != NULL){
+      file_close(file);
+    }
+    thread_current()->running_file = NULL;
+  }
+
   return success;
 }
 
