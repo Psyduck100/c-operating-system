@@ -11,7 +11,6 @@
 #include <stdio.h>
 #include <syscall-nr.h>
 
-
 static void syscall_handler (struct intr_frame *);
 static int get_user (const uint8_t *uaddr);
 static bool copy_in (void *dst, const void *usrc, size_t size);
@@ -90,16 +89,19 @@ check_buffer (const uint8_t *buffer, size_t size)
 
   const uint8_t *ptr = buffer;
 
-  if (buffer == NULL){
-    return false;
-  }
-  
-  for (size_t i = 0; i < size; i++){
-    bool valid = check_pointer(ptr + i);
-    if (valid == false){
+  if (buffer == NULL)
+    {
       return false;
     }
-  }
+
+  for (size_t i = 0; i < size; i++)
+    {
+      bool valid = check_pointer (ptr + i);
+      if (valid == false)
+        {
+          return false;
+        }
+    }
 
   return true;
 }
@@ -113,16 +115,15 @@ copy_in (void *dst_, const void *usrc_, size_t size)
   uint8_t *dst = dst_;
   const uint8_t *usrc = usrc_;
 
-
   /*byte by byte copies usrc to dst using get_user*/
   for (size_t i = 0; i < size; i++)
     {
 
       /*checks if usrc (user pointer) is null or points below PHYS_BASE*/
       if (usrc == NULL || usrc >= (uint8_t *)PHYS_BASE)
-      {
-        return false;
-      }
+        {
+          return false;
+        }
 
       int byte_value = get_user (usrc);
 
@@ -155,7 +156,7 @@ syscall_handler (struct intr_frame *f UNUSED)
   if (success == false)
     {
       /* fix resources and termiante*/
-      exit(-1);
+      exit (-1);
     }
 
   switch (syscall_number)
@@ -167,101 +168,101 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_EXIT:
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
       if (!success)
-        exit(-1);
+        exit (-1);
       exit (args[0]);
       break;
 
     case SYS_EXEC:
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
       if (!success)
-        exit(-1);
+        exit (-1);
       if (!check_pointer ((uint8_t *)args[0]))
-        exit(-1);
+        exit (-1);
       f->eax = exec ((char *)args[0]);
       break;
 
     case SYS_WAIT:
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
       if (!success)
-        exit(-1);
+        exit (-1);
       f->eax = wait ((pid_t)args[0]);
       break;
 
     case SYS_CREATE:
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 2);
       if (!success)
-        exit(-1);
+        exit (-1);
       if (!check_pointer ((uint8_t *)args[0]))
-        exit(-1);
+        exit (-1);
       f->eax = create ((char *)args[0], (unsigned)args[1]);
       break;
 
     case SYS_REMOVE:
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
       if (!success)
-        exit(-1);
+        exit (-1);
       if (!check_pointer ((uint8_t *)args[0]))
-        exit(-1);
+        exit (-1);
       f->eax = remove ((char *)args[0]);
       break;
 
     case SYS_OPEN:
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
       if (!success)
-        exit(-1);
+        exit (-1);
       if (!check_pointer ((uint8_t *)args[0]))
-        exit(-1);
+        exit (-1);
       f->eax = open ((char *)args[0]);
       break;
 
     case SYS_FILESIZE:
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
       if (!success)
-        exit(-1);
+        exit (-1);
       f->eax = filesize (args[0]);
       break;
 
     case SYS_READ:
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 3);
       if (!success)
-        exit(-1);
+        exit (-1);
       if (!check_buffer ((uint8_t *)args[1], (size_t)args[2]))
-        exit(-1);
+        exit (-1);
       f->eax = read (args[0], (void *)args[1], (unsigned)args[2]);
       break;
 
     case SYS_WRITE:
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 3);
       if (!success)
-        exit(-1);
+        exit (-1);
       if (!check_buffer ((uint8_t *)args[1], (size_t)args[2]))
-        exit(-1);
+        exit (-1);
       f->eax = write (args[0], (void *)args[1], (unsigned)args[2]);
       break;
 
     case SYS_SEEK:
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 2);
       if (!success)
-        exit(-1);
+        exit (-1);
       seek (args[0], (unsigned)args[1]);
       break;
 
     case SYS_TELL:
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
       if (!success)
-        exit(-1);
+        exit (-1);
       f->eax = tell (args[0]);
       break;
 
     case SYS_CLOSE:
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
       if (!success)
-        exit(-1);
+        exit (-1);
       close (args[0]);
       break;
 
     default:
-      exit(-1);
+      exit (-1);
       break;
     }
 }
@@ -281,24 +282,21 @@ exit (int status)
   struct thread *t = thread_current ();
   t->exit_status = status;
 
-
   /* Our die_sema makes it so that child threads don't call thread_exit()
-    until the parent thread is exited. However, we still need to treat
-    this current child thread as dead and as such need to make its file 
-    writable again*/
+      until the parent thread is exited. However, we still need to treat
+      this current child thread as dead and as such need to make its file
+      writable again*/
   if (t->running_file != NULL)
-  {
-    struct file *f = t->running_file;
-    t->running_file = NULL;
-    lock_acquire (&filesys_lock);
-    file_close (f);
-    lock_release (&filesys_lock);
-  }
+    {
+      struct file *f = t->running_file;
+      t->running_file = NULL;
+      lock_acquire (&filesys_lock);
+      file_close (f);
+      lock_release (&filesys_lock);
+    }
 
-  /*prints exit  message*/
+  // prints exit message
   printf ("%s: exit(%d)\n", thread_current ()->name, status);
-  sema_up (&t->wait_sema);
-  sema_down (&t->die_sema);
   thread_exit ();
 }
 
@@ -382,7 +380,7 @@ open (const char *file)
         }
     }
 
-  file_close(f);
+  file_close (f);
   return -1;
 }
 

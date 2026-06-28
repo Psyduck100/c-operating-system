@@ -19,7 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_CLA_ITEMS 4
+#define MAX_CLA_ITEMS 64
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -125,7 +125,10 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
 
+  /* acquire global lock before loading file */
+  lock_acquire (&filesys_lock);
   success = load (prog_name, &if_.eip, &if_.esp);
+  lock_release (&filesys_lock);
 
   // Free copy
   palloc_free_page (fn_copy);
@@ -230,58 +233,48 @@ start_process (void *file_name_)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED)
+process_wait (tid_t child_tid)
 {
-
   // find child with matching tid
   struct thread *t = thread_current ();
   struct thread *child = NULL;
-  struct list_elem *cur_child_elem = list_begin (&t->child_list);
+  struct list_elem *e;
 
-  // iterate while its not the tail (sentinel)
-  while (cur_child_elem != list_end (&t->child_list))
+  // iterate though list until tail (sentinel)
+  for (e = list_begin (&t->child_list); e != list_end (&t->child_list);
+       e = list_next (e))
     {
-      struct thread *cur_t
-          = list_entry (cur_child_elem, struct thread, child_elem);
-
-      if (cur_t->tid == child_tid)
+      struct thread *cur = list_entry (e, struct thread, child_elem);
+      if (cur->tid == child_tid)
         {
-          child = cur_t;
+          child = cur;
           break;
         }
-
-      cur_child_elem = list_next (cur_child_elem);
     }
 
   // handle all the -1 (fail) cases
   // element not found so child is null
   if (child == NULL)
-    {
-      return -1;
-    }
+    return -1;
 
   // child is already waited for
   if (child->waited_for)
-    {
-      return -1;
-    }
+    return -1;
 
-  // set child to be waited on
+  // child is already waited for
   child->waited_for = true;
 
-  // block untill child exits
+  /* block until child exits */
   sema_down (&child->wait_sema);
 
-  // retrieve child exit status
   int exit_status = child->exit_status;
 
-  // let child die
-  sema_up (&child->die_sema);
-
-  // clean up for child
+  /* remove child from list before letting it die */
   list_remove (&child->child_elem);
 
-  // return exit status
+  /* allow child to die */
+  sema_up (&child->die_sema);
+
   return exit_status;
 }
 
@@ -290,23 +283,25 @@ void
 process_exit (void)
 {
   struct thread *cur = thread_current ();
-
   uint32_t *pd;
-  struct list_elem *cur_child_elem = list_begin (&cur->child_list);
 
-  // if parent dies abruptly make sure to let children die
-  while (cur_child_elem != list_end (&cur->child_list))
+  /* free all children */
+  while (!list_empty (&cur->child_list))
     {
+      struct list_elem *e = list_pop_front (&cur->child_list);
+      struct thread *child = list_entry (e, struct thread, child_elem);
 
-      struct thread *child
-          = list_entry (cur_child_elem, struct thread, child_elem);
-
+      /* Allow the child to pass its die_sema down (if it already hasn't). */
       sema_up (&child->die_sema);
 
-      cur_child_elem = list_next (cur_child_elem);
+      /* Wait for the child to enter process_exit and up its wait_sema. */
+      sema_down (&child->wait_sema);
+
+      /* Now the child will continue to die, its struct remains valid
+         until it actually calls thread_exit and is freed later. */
     }
 
-  /* Close all open files */
+  /* Close all open files  */
   if (cur->fd_table != NULL)
     {
       for (int i = 2; i < 64; i++)
@@ -322,34 +317,31 @@ process_exit (void)
       palloc_free_page (cur->fd_table);
     }
 
-  /* When file is done execing, make it writable again*/
+  /* When file is done execing make it writable again*/
   if (cur->running_file != NULL)
     {
-      lock_acquire (&filesys_lock);
-      file_allow_write (cur->running_file);
-      file_close (cur->running_file);
+      struct file *f = cur->running_file;
       cur->running_file = NULL;
+      lock_acquire (&filesys_lock);
+      file_close (f);
       lock_release (&filesys_lock);
     }
 
   /* Destroy the current process's page directory and switch back
-     to the kernel-only page directory. */
+       to the kernel-only page directory. */
   pd = cur->pagedir;
   if (pd != NULL)
     {
-      /* Correct ordering here is crucial.  We must set
-         cur->pagedir to NULL before switching page directories,
-         so that a timer interrupt can't switch back to the
-         process page directory.  We must activate the base page
-         directory before destroying the process's page
-         directory, or our active page directory will be one
-         that's been freed (and cleared). */
+
       cur->pagedir = NULL;
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
-}
 
+  /* Notify parent and wait for permission to die */
+  sema_up (&cur->wait_sema);
+  sema_down (&cur->die_sema);
+}
 /* Sets up the CPU for running user code in the current
    thread.
    This function is called on every context switch. */
@@ -546,12 +538,21 @@ load (const char *file_name, void (**eip) (void), void **esp)
   success = true;
 
 done:
-  /* We arrive here whether the load is successful or not. */
-  if (!success && file != NULL)
+  if (!success)
     {
-      file_allow_write (file);
-      file_close (file);
+      if (t->running_file != NULL)
+        {
+          /* file_deny_write was called, file_close handles allow internally */
+          file_close (t->running_file);
+          t->running_file = NULL;
+        }
+      else if (file != NULL)
+        {
+          /* file was opened but file_deny_write was never called */
+          file_close (file);
+        }
     }
+
   return success;
 }
 
