@@ -51,6 +51,14 @@ where multiple threads may be tokenizing strings at the same time.
 >> and arguments.  In Unix-like systems, the shell does this
 >> separation.  Identify at least two advantages of the Unix approach.
 
+-> Users can use different shells with different syntaxes, parsing, etc
+   without making changes to the kernel (i.e: more flexible/modular and 
+   reduces kernel crashes/bugs)
+
+-> The kernel only needs to exec a prog with an already parsed executable
+   so it does not need to understand how to parse, tokenize, etc
+   other than running the file which makes the kernel more modular
+
                  SYSTEM CALLS
                  ============
 
@@ -107,6 +115,21 @@ files.
 >> B3: Describe your code for reading and writing user data from the
 >> kernel.
 
+For small or fix sized args, we call copy_in and it reads the memory
+using get_user (reads a single byte and returns -1 if page fault).
+Then the data is copied into a kernel buffer to avoid races.
+
+For larger buffers (like the ones passed to read/write), we first 
+verify that the entire user buffer is valid by calling 
+check_buffer, which checks every byte with get_user. 
+If the buffer is accessible, we pass the original user ptr directly 
+to the file system or pre-built functions (i.e: file_read, file_write, putbuf). 
+Then, the kernel can dereference user ptrs once they are known to be valid.
+
+For string arguments (ex: file names), we check the first byte with 
+check_pointer to confirm the address is not NULL and points to user memory, 
+then assume the null-terminated string is safe to access.
+
 >> B4: Suppose a system call causes a full page (4,096 bytes) of data
 >> to be copied from user space into the kernel.  What is the least
 >> and the greatest possible number of inspections of the page table
@@ -133,6 +156,26 @@ inspections for the case described above is unavoidable.
 
 >> B5: Briefly describe your implementation of the "wait" system call
 >> and how it interacts with process termination.
+
+wait syscall calls process_wait which does the following: 
+
+1. Searches current threads child_list for a child with the given tid.
+   If no such child exists or the child is already waited for, return -1.
+   If child is found, then set waited_for = 1, then runs 
+   sema_down(&child->wait_sema).
+
+2. When the child eventually calls exit or is killed by an exception,
+   its process_exit stores the exit status, and then it runs
+   sema_up(&cur->wait_sema) to unblock the parent and then runs
+   sema_down(&cur->die_sema)
+
+3. Since the parent is now unblocked by the wait_sema, it retrieves
+   the child's exit status and then removes the child from child_list.
+   Then it runs sema_up(&child->die_sema), which allows the child to 
+   die and free its allocated resources.
+
+4. If the child has already exited before the parent calls wait, the
+   wait_sema is already up, so the parent unblock and does step 3.
 
 >> B6: Any access to user program memory at a user-specified address
 >> can fail due to a bad pointer value.  Such accesses must cause the
@@ -257,10 +300,64 @@ the child processes pid or -1 respectively.
 >> terminates without waiting, before C exits?  After C exits?  Are
 >> there any special cases?
 
+Synch between P and C relies on 2 semaphores (wait, die)
+and a flag (waited_for):
+
+wait_sema (init to 0) -> C uses this to signal exit, P waits for this
+die_sema (init to 0) -> P signals that C can die, C waits for this
+waited_for -> prevents multiple waits on same C} 
+
+
+1. How do you ensure proper synchronization and avoid race conditions
+   when P calls wait(C) before C exits?
+
+   P blocks on wait_sema. When C terminates, it stores exit status,
+   runs sema up on wait_seam, and downs die_sema. P wakes up, then 
+   retrieves the exit status, removes C from the child_list and ups
+   die_sema. C then dies and no race happens because C does not free 
+   itself until after die_sema is up.
+
+2. After C exits?
+
+   After C exits, wait_sema is already up, so when P calls wait,
+   sema_down(&child->wait_sema) returns immediately and P reads
+   the exit status, remove the child from child_list, and ups
+   die_sema. This then unblocks C to die.
+
+3. How about when P terminates without waiting, before C exits?
+
+   In process_exit, P iterates through all remaning children
+   in child-list. For each child, P ups die_sema to ensure that
+   when C exits, it will not block forever on die_sema. P then 
+   removes the child from child_list. P then does not wait for
+   C to exit and terminates. C keeps running, and when it exits,
+   it finds die_sema up so it can die imeediately without blocking.
+
+4. After C exits?
+
+   If C already exited, it is blocked on die_sema. P calls 
+   process_exit which will up die_sema, allowing C to finish
+   dying. P then removes C from child_list.
+
+5. Special cases
+
+-> In cases where a second wait might be called, waited_for 
+   prevents a second wait from accessing a freed thread and
+   crashing because of that
+
+-> If child fails to load, the parent in process_execute 
+   returns -1 without touching the semas. The child's
+   start_process is already terminated and freed 
+   its resources. 
+
 ---- RATIONALE ----
 
 >> B9: Why did you choose to implement access to user memory from the
 >> kernel in the way that you did?
+
+We chose to implement user memeory access by checking bytes with
+get_user. // Alex explain why
+
 
 >> B10: What advantages or disadvantages can you see to your design
 >> for file descriptors?
