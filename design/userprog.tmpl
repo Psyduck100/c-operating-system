@@ -226,7 +226,7 @@ pointer issues we ended up using method 2 from the documentation of
 checking that a user pointer points below PHYS_BASE 
 (so pointer isn't in kernel virtual address space) and isn't NULL, 
 then dereferencing it to have a page fault occur in the case 
-of an invalid pointer (that wasn't already checked).
+of an invalid pointer (for cases such as unmapped address etc).
 
 However, we also had to keep in mind about freeing resources so
 we implemented the get_user function to help. Without get_user when we
@@ -388,8 +388,24 @@ waited_for -> prevents multiple waits on same C
 >> B9: Why did you choose to implement access to user memory from the
 >> kernel in the way that you did?
 
-We chose to implement user memeory access by checking bytes with
-get_user. // Alex explain why
+With accessing user memory from the kernel the most important thing 
+was making sure the pointers were valid since we can't trust user
+addresses. As such we make sure to check every possible user memory 
+pointer. To do this we used method 2 from the documentation of 
+checking that a user pointer points below PHYS_BASE (so pointer 
+isn't in kernel virtual address space) and isn't NULL, then 
+dereferencing it to have a page fault occur in the case of an 
+invalid pointer (for cases such as unmapped address etc).
+
+We also decided to choose method 2 over method 1 as it is quicker
+than method 1 and is used in real kernel systems.
+
+To actually access the user memory from the kernel with method 2
+we used get_user. Without get_user when we dereference the pointer
+there's no way to return an error code from a memory access.
+(get_user usage explained in detail in question B6). By using
+get_user with the method 2 page fault method we can then free
+resources for the process that did invalid pointer access.
 
 
 >> B10: What advantages or disadvantages can you see to your design
