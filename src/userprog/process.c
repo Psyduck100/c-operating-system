@@ -291,8 +291,10 @@ process_exit (void)
       struct list_elem *e = list_pop_front (&cur->child_list);
       struct thread *child = list_entry (e, struct thread, child_elem);
 
+
       /* Allow the child to pass its die_sema down (if it already hasn't). */
-      sema_up (&child->die_sema);
+      sema_up (&child->die_sema); // unblocks child from dying
+
 
       /* Wait for the child to enter process_exit and up its wait_sema. */
       sema_down (&child->wait_sema);
@@ -339,8 +341,10 @@ process_exit (void)
     }
 
   /* Notify parent and wait for permission to die */
-  sema_up (&cur->wait_sema);
-  sema_down (&cur->die_sema);
+  sema_up (&cur->wait_sema); //increments value to 1
+
+
+  sema_down (&cur->die_sema); //blocks itself from dying
 }
 /* Sets up the CPU for running user code in the current
    thread.

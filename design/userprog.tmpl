@@ -10,7 +10,7 @@
 
 Arvindh Sengu arvindh.sengu@mail.utoronto.ca
 Alex Xu <alexxx.xu@mail.utoronto.ca>
-FirstName LastName <email@domain.example>
+Roger dai roger.dai@mail.utoronto.ca
 
 ---- PRELIMINARIES ----
 
@@ -30,11 +30,29 @@ FirstName LastName <email@domain.example>
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+#define MAX_CLA_ITEMS 64
+defined the max amount of items we accept at the command line 
+
+
+
 ---- ALGORITHMS ----
 
 >> A2: Briefly describe how you implemented argument parsing.  How do
 >> you arrange for the elements of argv[] to be in the right order?
 >> How do you avoid overflowing the stack page?
+
+in process_start we process the arguments from left to right. Because 
+we want this on the stack such that it will be popped in the order
+we read it in, we iterate over it in reverse order when placing
+it on the stack. Furthermore, to 4 byte align it, we track 
+the total number of chars pushed, and can use modulo 4 to make
+sure its aligned before pushing the null sentinel and the 
+addresses of the args. We also push these addresses in the same
+reverse order to ensure they read in the correct order.
+
+To prevent stack overflow first we have a max amount of CLA
+items defined at the top level.
+
 
 ---- RATIONALE ----
 
@@ -161,21 +179,31 @@ wait syscall calls process_wait which does the following:
 
 1. Searches current threads child_list for a child with the given tid.
    If no such child exists or the child is already waited for, return -1.
-   If child is found, then set waited_for = 1, then runs 
-   sema_down(&child->wait_sema).
+
+   If child is found, then set waited_for to be true, then runs 
+   sema_down(&child->wait_sema), blocking the parent
 
 2. When the child eventually calls exit or is killed by an exception,
-   its process_exit stores the exit status, and then it runs
+   exit stores the exit status and calls thread_exit
+   and calls process_exit if in user program. This then runs
    sema_up(&cur->wait_sema) to unblock the parent and then runs
-   sema_down(&cur->die_sema)
+   sema_down(&cur->die_sema) to block itself from dying
+   so the parent has an opportunity to access fields
 
 3. Since the parent is now unblocked by the wait_sema, it retrieves
    the child's exit status and then removes the child from child_list.
-   Then it runs sema_up(&child->die_sema), which allows the child to 
-   die and free its allocated resources.
+   Then it runs sema_up(&child->die_sema), which unblocks the child 
+   Allowing it to do and free its resources
 
 4. If the child has already exited before the parent calls wait, the
-   wait_sema is already up, so the parent unblock and does step 3.
+   wait_sema is already up, so the parent unblock and does step 3
+
+5. if parent exits abruptly, process exit guarantees that all children
+   blocked because of it are allowed to die via a while loop in which
+   we call sema_up, but to ensure that the resources the child uses
+   are accessible we must ensure parent outlives child, so we block 
+   the parent via sema_down untill the finishing child process releases
+   it
 
 >> B6: Any access to user program memory at a user-specified address
 >> can fail due to a bad pointer value.  Such accesses must cause the
@@ -305,7 +333,7 @@ and a flag (waited_for):
 
 wait_sema (init to 0) -> C uses this to signal exit, P waits for this
 die_sema (init to 0) -> P signals that C can die, C waits for this
-waited_for -> prevents multiple waits on same C} 
+waited_for -> prevents multiple waits on same C
 
 
 1. How do you ensure proper synchronization and avoid race conditions
@@ -317,7 +345,8 @@ waited_for -> prevents multiple waits on same C}
    die_sema. C then dies and no race happens because C does not free 
    itself until after die_sema is up.
 
-2. After C exits?
+2. How do you ensure proper synchronization and avoid race conditions
+   when P calls wait(C), After C exits?
 
    After C exits, wait_sema is already up, so when P calls wait,
    sema_down(&child->wait_sema) returns immediately and P reads
@@ -329,15 +358,19 @@ waited_for -> prevents multiple waits on same C}
    In process_exit, P iterates through all remaning children
    in child-list. For each child, P ups die_sema to ensure that
    when C exits, it will not block forever on die_sema. P then 
-   removes the child from child_list. P then does not wait for
-   C to exit and terminates. C keeps running, and when it exits,
-   it finds die_sema up so it can die imeediately without blocking.
+   removes the child from child_list. P blocks itself untill C
+   finishes running and then C signals P when P can die. In this
+   way P always outlives C. C keeps running, and when it exits,
+   it finds die_sema up so it can die imeediately without blocking,
+   signals P, dies, and P can die too.
 
-4. After C exits?
+4. How about when P terminates without waiting, After C exits?
 
-   If C already exited, it is blocked on die_sema. P calls 
+   If C already exited, it is blocked on die_sema,
+   it then pre-emptiely ups wait_sema. P calls 
    process_exit which will up die_sema, allowing C to finish
-   dying. P then removes C from child_list.
+   dying. P then removes C from child_list. So basically the
+   child's death is tied to the parents, C dies ~ when P does.
 
 5. Special cases
 
