@@ -5,6 +5,8 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include <hash.h>
+
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -122,6 +124,8 @@ struct thread
 
   bool loaded; /* A bool to represent if the thread
                    successfully loaded*/
+
+   struct hash vm; /*hash table for the supplemental page table*/
 
   /* Shared between thread.c and synch.c. */
   struct list_elem elem; /* List element. */

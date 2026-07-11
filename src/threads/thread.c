@@ -11,6 +11,9 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include "vm/page.h"
+#include <hash.h>
+
 #ifdef USERPROG
 #include "threads/palloc.h"
 #include "userprog/process.h"

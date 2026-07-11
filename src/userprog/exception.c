@@ -1,11 +1,15 @@
 #include "userprog/exception.h"
-#include <inttypes.h>
-#include <stdio.h>
-#include "userprog/gdt.h"
+#include "vm/page.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/gdt.h"
 #include "userprog/syscall.h"
+#include <inttypes.h>
+#include <stdio.h>
+#include "threads/palloc.h"
+#include "userprog/process.h"
+
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -29,7 +33,7 @@ static void page_fault (struct intr_frame *);
    Refer to [IA32-v3a] section 5.15 "Exception and Interrupt
    Reference" for a description of each of these exceptions. */
 void
-exception_init (void) 
+exception_init (void)
 {
   /* These exceptions can be raised explicitly by a user program,
      e.g. via the INT, INT3, INTO, and BOUND instructions.  Thus,
@@ -64,14 +68,14 @@ exception_init (void)
 
 /* Prints exception statistics. */
 void
-exception_print_stats (void) 
+exception_print_stats (void)
 {
   printf ("Exception: %lld page faults\n", page_fault_cnt);
 }
 
 /* Handler for an exception (probably) caused by a user process. */
 static void
-kill (struct intr_frame *f) 
+kill (struct intr_frame *f)
 {
   /* This interrupt is one (probably) caused by a user process.
      For example, the process might have tried to access unmapped
@@ -80,7 +84,7 @@ kill (struct intr_frame *f)
      the kernel.  Real Unix-like operating systems pass most
      exceptions back to the process via signals, but we don't
      implement them. */
-     
+
   /* The interrupt frame's code segment value tells us where the
      exception originated. */
   switch (f->cs)
@@ -88,10 +92,10 @@ kill (struct intr_frame *f)
     case SEL_UCSEG:
       /* User's code segment, so it's a user exception, as we
          expected.  Kill the user process.  */
-      printf ("%s: dying due to interrupt %#04x (%s).\n",
-              thread_name (), f->vec_no, intr_name (f->vec_no));
+      printf ("%s: dying due to interrupt %#04x (%s).\n", thread_name (),
+              f->vec_no, intr_name (f->vec_no));
       intr_dump_frame (f);
-      thread_exit (); 
+      thread_exit ();
 
     case SEL_KCSEG:
       /* Kernel's code segment, which indicates a kernel bug.
@@ -99,15 +103,67 @@ kill (struct intr_frame *f)
          may cause kernel exceptions--but they shouldn't arrive
          here.)  Panic the kernel to make the point.  */
       intr_dump_frame (f);
-      PANIC ("Kernel bug - unexpected interrupt in kernel"); 
+      PANIC ("Kernel bug - unexpected interrupt in kernel");
 
     default:
       /* Some other code segment?  Shouldn't happen.  Panic the
          kernel. */
-      printf ("Interrupt %#04x (%s) in unknown segment %04x\n",
-             f->vec_no, intr_name (f->vec_no), f->cs);
+      printf ("Interrupt %#04x (%s) in unknown segment %04x\n", f->vec_no,
+              intr_name (f->vec_no), f->cs);
       thread_exit ();
     }
+}
+
+/* Helper for page fault to deal with cases involving
+   the vm project 3. (list cases later when working)
+   Returns true if successfully done and false otherwise*/
+static bool
+vm_page_fault_helper (struct supp_page_table_entry *spte)
+{  
+   /*if the supp_page_table_entry spte already has a physical frame
+     then we don't do anything*/
+   if (spte->in_memory){
+      return true;
+   }
+
+   
+   if (spte->type == VM_BIN){
+
+      /*page allocation for physical memory*/
+      void* kpage = palloc_get_page(PAL_USER);
+
+      /*if no physical frame/page left*/
+      if (kpage == NULL)
+      {
+         return false;
+      }
+      
+      bool success = load_file (spte, kpage);
+
+      if (!success)
+      {
+         palloc_free_page (kpage);
+         return false;
+      }
+
+      /*Create mapping between user virtual address to the kernel virtual
+        address (physical frame)*/
+      success = install_page (spte->vaddr, kpage, spte->writable);
+
+      if (!success)
+      {
+         palloc_free_page (kpage);
+         return false;
+      }
+
+      spte->in_memory = true;
+
+      return true;
+
+   }
+
+   return false;
+
 }
 
 /* Page fault handler.  This is a skeleton that must be filled in
@@ -122,12 +178,12 @@ kill (struct intr_frame *f)
    description of "Interrupt 14--Page Fault Exception (#PF)" in
    [IA32-v3a] section 5.15 "Exception and Interrupt Reference". */
 static void
-page_fault (struct intr_frame *f) 
+page_fault (struct intr_frame *f)
 {
-  bool not_present;  /* True: not-present page, false: writing r/o page. */
-  bool write;        /* True: access was write, false: access was read. */
-  bool user;         /* True: access by user, false: access by kernel. */
-  void *fault_addr;  /* Fault address. */
+  bool not_present; /* True: not-present page, false: writing r/o page. */
+  bool write;       /* True: access was write, false: access was read. */
+  bool user;        /* True: access by user, false: access by kernel. */
+  void *fault_addr; /* Fault address. */
 
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
@@ -136,7 +192,7 @@ page_fault (struct intr_frame *f)
      See [IA32-v2a] "MOV--Move to/from Control Registers" and
      [IA32-v3a] 5.15 "Interrupt 14--Page Fault Exception
      (#PF)". */
-  asm ("movl %%cr2, %0" : "=r" (fault_addr));
+  asm ("movl %%cr2, %0" : "=r"(fault_addr));
 
   /* Turn interrupts back on (they were only off so that we could
      be assured of reading CR2 before it changed). */
@@ -145,21 +201,22 @@ page_fault (struct intr_frame *f)
   /* Count page faults. */
   page_fault_cnt++;
 
-
   /* Determine cause. */
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-   /*For method 2 of making sure invalid pointers must be rejected 
-   without harm to the kernel or other running processes,*/
-   if (user == false && fault_addr < PHYS_BASE) {
+  
+  /*For method 2 of making sure invalid pointers must be rejected
+  without harm to the kernel or other running processes,*/
+   if (user == false && fault_addr < PHYS_BASE)
+    {
 
       /*This is to make sure that we don't leak resources
       when checking for invalid pointers. After doing get_user
       or put_user if there is a fault we need to recover from
       it. We set f->eip to f->epx to basically skip the portion
-      that caused the page fault so we can do things such as 
+      that caused the page fault so we can do things such as
       releasing locks or free memory. We set f->eax to
       0xffffffff (which is -1) so when we return from page_fault()
       and go back to get_user() or put_user() they will correctly
@@ -167,24 +224,44 @@ page_fault (struct intr_frame *f)
       resources are properly sorted the processes can be terminated*/
       f->eip = (void *)f->eax;
       f->eax = 0xffffffff;
-      
+
       /*return so we don't kill the process before releasing locks
       and freeing memory*/
       return;
    }
-   if (user == true) {
-      exit(-1);
+   if (user == true)
+   {
+      exit (-1);
       return;
    }
+
+  /*for project 3 if the virtual address does not have a physical
+    mapping (not_present == true) then we call the handler to deal
+    with the cases (i.e swapping, mmap, load the file from disk etc.)*/
+    if (not_present == true){
+
+      /* Look up vm_entry, exit if not found */
+      struct supp_page_table_entry *spte = find_spte(fault_addr);
+      if (spte == NULL){
+        exit(-1);
+      }
+      
+      bool success = vm_page_fault_helper(spte);
+
+      if (!success){
+         exit(-1);
+      }
+      else{
+         return;
+      }
+    }
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
-  printf ("Page fault at %p: %s error %s page in %s context.\n",
-          fault_addr,
+  printf ("Page fault at %p: %s error %s page in %s context.\n", fault_addr,
           not_present ? "not present" : "rights violation",
-          write ? "writing" : "reading",
-          user ? "user" : "kernel");
+          write ? "writing" : "reading", user ? "user" : "kernel");
   kill (f);
 }
 

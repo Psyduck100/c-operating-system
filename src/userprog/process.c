@@ -5,6 +5,7 @@
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
@@ -12,12 +13,14 @@
 #include "userprog/pagedir.h"
 #include "userprog/syscall.h"
 #include "userprog/tss.h"
+#include "vm/page.h"
 #include <debug.h>
 #include <inttypes.h>
 #include <round.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 
 #define MAX_CLA_ITEMS 64
 
@@ -119,6 +122,9 @@ start_process (void *file_name_)
   strlcpy (fn_copy, file_name, PGSIZE);
   char *prog_name = strtok_r (fn_copy, " ", &save_ptr2);
 
+  hash_init (&thread_current ()->vm, vm_hash_spte, vm_hash_spte_less_func,
+             NULL);
+
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
@@ -132,7 +138,7 @@ start_process (void *file_name_)
 
   // Free copy
   palloc_free_page (fn_copy);
-
+  
   /*current thread is the child thread from thread exec*/
   struct thread *cur_t = thread_current ();
 
@@ -291,10 +297,8 @@ process_exit (void)
       struct list_elem *e = list_pop_front (&cur->child_list);
       struct thread *child = list_entry (e, struct thread, child_elem);
 
-
       /* Allow the child to pass its die_sema down (if it already hasn't). */
       sema_up (&child->die_sema); // unblocks child from dying
-
 
       /* Wait for the child to enter process_exit and up its wait_sema. */
       sema_down (&child->wait_sema);
@@ -302,6 +306,8 @@ process_exit (void)
       /* Now the child will continue to die, its struct remains valid
          until it actually calls thread_exit and is freed later. */
     }
+
+  hash_destroy (&cur->vm, vm_hash_spte_destroy_func);
 
   /* Close all open files  */
   if (cur->fd_table != NULL)
@@ -341,10 +347,9 @@ process_exit (void)
     }
 
   /* Notify parent and wait for permission to die */
-  sema_up (&cur->wait_sema); //increments value to 1
+  sema_up (&cur->wait_sema); // increments value to 1
 
-
-  sema_down (&cur->die_sema); //blocks itself from dying
+  sema_down (&cur->die_sema); // blocks itself from dying
 }
 /* Sets up the CPU for running user code in the current
    thread.
@@ -562,7 +567,7 @@ done:
 
 /* load() helpers. */
 
-static bool install_page (void *upage, void *kpage, bool writable);
+bool install_page (void *upage, void *kpage, bool writable);
 
 /* Checks whether PHDR describes a valid, loadable segment in
    FILE and returns true if so, false otherwise. */
@@ -640,31 +645,41 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-      /* Get a page of memory. */
-      uint8_t *kpage = palloc_get_page (PAL_USER);
-      if (kpage == NULL)
+      /* Dynamically allocate memory for supp_page_table_entry
+         so that we can free when done */
+      struct supp_page_table_entry *spte
+          = malloc (sizeof (struct supp_page_table_entry));
+      if (spte == NULL)
         return false;
 
-      /* Load this page. */
-      if (file_read (file, kpage, page_read_bytes) != (int)page_read_bytes)
+      /* Initialize spte values for bin file */
+      spte->type = VM_BIN;
+      spte->vaddr = upage;
+      spte->writable = writable;
+      spte->file = file;
+      spte->offset = ofs;
+      spte->read_bytes = page_read_bytes;
+      spte->zero_bytes = page_zero_bytes;
+      spte->in_memory = false;
+      // spte->swap_slot = NULL; // not sure what to make this yet
+
+      /* Insert spte into current threads vm hash table */
+      if (!hash_insert (&thread_current ()->vm, &spte->elem))
         {
-          palloc_free_page (kpage);
+          free (spte);
           return false;
         }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
 
-      /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable))
-        {
-          palloc_free_page (kpage);
-          return false;
-        }
-
-      /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
+
+      /* Need to update offset for next page read
+         so that each page remembers where in the
+         file its own data starts */
+      ofs += page_read_bytes;
     }
+
   return true;
 }
 
@@ -675,15 +690,41 @@ setup_stack (void **esp)
 {
   uint8_t *kpage;
   bool success = false;
-
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
   if (kpage != NULL)
     {
       success = install_page (((uint8_t *)PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE;
+        {
+          *esp = PHYS_BASE;
+          /* Dynamicallly allocate memory for spte
+             so that we can free it later */
+          struct supp_page_table_entry *spte
+              = malloc (sizeof (struct supp_page_table_entry));
+          if (spte == NULL)
+            {
+              palloc_free_page (kpage);
+              return false;
+            }
+
+          /* Initialize spte fields for anon file bc stack isn't
+             backed by any file */
+          spte->type = VM_ANON;
+          spte->vaddr = ((uint8_t *)PHYS_BASE) - PGSIZE;
+          spte->writable = true;
+          spte->in_memory = true;
+          spte->file = NULL;
+          spte->offset = 0;
+          spte->read_bytes = 0;
+          spte->zero_bytes = PGSIZE;
+          // spte->swap_slot = NULL; // not sure what to make this yet
+
+          hash_insert (&thread_current ()->vm, spte);
+        }
       else
-        palloc_free_page (kpage);
+        {
+          palloc_free_page (kpage);
+        }
     }
   return success;
 }
@@ -697,7 +738,7 @@ setup_stack (void **esp)
    with palloc_get_page().
    Returns true on success, false if UPAGE is already mapped or
    if memory allocation fails. */
-static bool
+bool
 install_page (void *upage, void *kpage, bool writable)
 {
   struct thread *t = thread_current ();
