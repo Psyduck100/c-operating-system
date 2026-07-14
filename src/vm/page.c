@@ -4,6 +4,7 @@
 #include "filesys/file.h"
 #include <string.h>
 #include "threads/vaddr.h"
+#include "threads/palloc.h"
 
 /*Retuns a hash of a supp_page_table_entry for the supplmental page table*/
 unsigned
@@ -75,4 +76,58 @@ load_file (struct supp_page_table_entry *spte, void *kaddr){
     /* Set the rest of the file = 0 */
     memset(kaddr + spte->read_bytes, 0, spte->zero_bytes);
     return true;
+}
+
+void frame_table_init (void) {
+    list_init(&frame_table);
+    lock_init(&frame_table_lock);
+}
+
+
+void *frame_allocate (void *v_page_addr, enum palloc_flags flags){
+    void *k_page_addr = palloc_get_page(PAL_USER | flags);
+    if (k_page_addr == NULL) {
+        //evict: do this later
+
+        return NULL;
+    }
+
+    struct frame *f = malloc(sizeof (struct frame));
+    if (f == NULL){
+        palloc_free_page(k_page_addr);
+
+        return NULL;
+    }
+
+    f->k_page_addr = k_page_addr;
+    f->v_page_addr = v_page_addr;
+    f->owning_thread = thread_current;
+    f->pinned = false;
+
+    lock_aquire (&frame_table_lock);
+    list_push_back(&frame_table, &f->frame_elem);
+    lock_release(&frame_table_lock);
+
+
+    return k_page_addr;
+}
+
+void frame_free(void *k_page_addr){
+    lock_acquire(&frame_table_lock);
+
+    struct list_elem *cur;
+
+    for(cur = list_begin(&frame_table); cur != list_end(&frame_table); cur = list_next(cur)){
+        struct frame *f = list_entry(cur, struct frame, frame_elem);
+        if (f->k_page_addr == k_page_addr){
+            list_remove(cur);
+            free(f);
+            break;
+        }
+
+
+    }
+    lock_release(&frame_table_lock);
+    palloc_free_page(k_page_addr);
+
 }
