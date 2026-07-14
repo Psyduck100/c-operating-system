@@ -9,7 +9,7 @@
 #include <stdio.h>
 #include "threads/palloc.h"
 #include "userprog/process.h"
-
+#include "vm/page.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -130,7 +130,7 @@ vm_page_fault_helper (struct supp_page_table_entry *spte)
    if (spte->type == VM_BIN){
 
       /*page allocation for physical memory*/
-      void* kpage = palloc_get_page(PAL_USER);
+      void* kpage = frame_allocate(spte, PAL_USER);
 
       /*if no physical frame/page left*/
       if (kpage == NULL)
@@ -142,7 +142,7 @@ vm_page_fault_helper (struct supp_page_table_entry *spte)
 
       if (!success)
       {
-         palloc_free_page (kpage);
+         frame_free(kpage);
          return false;
       }
 
@@ -152,7 +152,7 @@ vm_page_fault_helper (struct supp_page_table_entry *spte)
 
       if (!success)
       {
-         palloc_free_page (kpage);
+         frame_free(kpage);
          return false;
       }
 
@@ -229,11 +229,6 @@ page_fault (struct intr_frame *f)
       and freeing memory*/
       return;
    }
-   if (user == true)
-   {
-      exit (-1);
-      return;
-   }
 
   /*for project 3 if the virtual address does not have a physical
     mapping (not_present == true) then we call the handler to deal
@@ -255,6 +250,12 @@ page_fault (struct intr_frame *f)
          return;
       }
     }
+
+   else
+   {
+      exit (-1);
+      return;
+   }
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to

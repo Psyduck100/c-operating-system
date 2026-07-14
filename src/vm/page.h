@@ -38,6 +38,7 @@ struct frame {
   void *k_page_addr; //kernal address of the page/frame as pintos maps kernal to phys
   void *v_page_addr; //virtual address
   struct thread * owning_thread; //thread that owns this page
+  struct supp_page_table_entry *spte; 
   struct list_elem frame_elem;
   bool pinned;
 };
@@ -45,8 +46,8 @@ struct frame {
 static struct list frame_table;
 static struct lock frame_table_lock;
 void frame_table_init(void);
-void *frame_allocate(void *vaddr, enum palloc_flags flags);
-void frame_free(void *kaddr);
+void *frame_allocate(struct supp_page_table_entry *spte, enum palloc_flags flags);
+void frame_free(void *k_page_addr);
 
 unsigned vm_hash_spte(const struct hash_elem *e, void *aux);
 bool vm_hash_spte_less_func (const struct hash_elem *a,

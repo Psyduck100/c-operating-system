@@ -87,7 +87,7 @@ void frame_table_init (void) {
 }
 
 
-void *frame_allocate (void *v_page_addr, enum palloc_flags flags){
+void *frame_allocate (struct supp_page_table_entry *spte, enum palloc_flags flags){
     void *k_page_addr = palloc_get_page(PAL_USER | flags);
     if (k_page_addr == NULL) {
         //evict: do this later
@@ -103,7 +103,8 @@ void *frame_allocate (void *v_page_addr, enum palloc_flags flags){
     }
 
     f->k_page_addr = k_page_addr;
-    f->v_page_addr = v_page_addr;
+    f->v_page_addr = spte->vaddr;
+    f->spte = spte;
     f->owning_thread = thread_current();
     f->pinned = false;
 
