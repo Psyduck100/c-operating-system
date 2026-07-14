@@ -6,6 +6,9 @@
 #include "threads/vaddr.h"
 #include "threads/palloc.h"
 
+extern struct list frame_table;
+extern struct lock frame_table_lock;
+
 /*Retuns a hash of a supp_page_table_entry for the supplmental page table*/
 unsigned
 vm_hash_spte (const struct hash_elem *e, void *aux)
@@ -101,10 +104,10 @@ void *frame_allocate (void *v_page_addr, enum palloc_flags flags){
 
     f->k_page_addr = k_page_addr;
     f->v_page_addr = v_page_addr;
-    f->owning_thread = thread_current;
+    f->owning_thread = thread_current();
     f->pinned = false;
 
-    lock_aquire (&frame_table_lock);
+    lock_acquire (&frame_table_lock);
     list_push_back(&frame_table, &f->frame_elem);
     lock_release(&frame_table_lock);
 

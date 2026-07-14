@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <hash.h>
 #include "filesys/off_t.h"
+#include "threads/palloc.h"
 
 
 /* States the type of vm page*/
