@@ -10,6 +10,8 @@
 #include "threads/palloc.h"
 #include "userprog/process.h"
 #include "vm/page.h"
+#include "vm/swap.h"
+#include "vm/frame.h"
 
 #define MAX_STACK_SIZE 8*1024*1024 //8 mb
 
@@ -169,8 +171,6 @@ vm_page_fault_helper (struct supp_page_table_entry *spte)
          return false;
       }
 
-
-
       spte->in_memory = true;
 
       return true;
@@ -181,6 +181,16 @@ vm_page_fault_helper (struct supp_page_table_entry *spte)
    if (spte->type == VM_ANON) {
       void *kpage = frame_allocate(spte, PAL_USER | PAL_ZERO);
       if (kpage == NULL) return false;
+
+      /* If page was swapped out */
+      if (spte->swap_slot != 0) {
+         swap_in(spte->swap_slot, kpage);
+         spte->swap_slot=0;
+      }
+      /* Else new page with 0's */
+      else {
+         memset(kpage, 0, PGSIZE);
+      }
 
       bool success = install_page (spte->vaddr, kpage, spte->writable);
 

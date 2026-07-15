@@ -127,6 +127,9 @@ struct thread
 
    struct hash vm; /*hash table for the supplemental page table*/
 
+   struct list mmap_list; /*list of memory mapped files*/ 
+   mapid_t next_mapid; /*next available mapid for memory mapped files*/
+
    void *user_esp; /*user stack pointer register so we can detect stack growth */
 
   /* Shared between thread.c and synch.c. */

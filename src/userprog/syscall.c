@@ -510,3 +510,35 @@ close (int fd)
   file_close (f);
   lock_release (&filesys_lock);
 }
+
+/* Maps the file open as FD into the proccess virtual addr space */
+static mapid_t
+mmap (int fd, void *addr) {
+  struct thread *t = thread_current ();
+  struct file *f;
+  struct mmap_file *mmap;
+  struct list_elem *e;
+  off_t file_len;
+  int num_pages;
+  void *upage;
+  
+  /* Validate the fd */
+  if (fd == 0 || fd = 1) {
+    return -1;
+  }
+
+  f = get_file (fd);
+  if (f == NULL) {
+    return -1;}
+
+  /* Validate addr */
+  if (addr == NULL || pg_ofs (addr) != 0) {
+    return -1;
+  }
+
+  /* Acquire lock to avoid race conditions */
+  lock_acquire (&filesys_lock);
+
+
+  
+}

@@ -515,6 +515,8 @@ init_thread (struct thread *t, const char *name, int priority)
   sema_down() child process will wait until parent process reads exit status*/
   sema_init (&t->die_sema, 0);
 
+  list_init (&t->mmap_list);
+  t->next_mapid = 0;
   list_init (&t->child_list);
 }
 /* Allocates a SIZE-byte frame at the top of thread T's stack and

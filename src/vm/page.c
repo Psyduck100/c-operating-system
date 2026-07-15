@@ -1,4 +1,5 @@
 #include "vm/page.h"
+#include "vm/swap.h"
 #include "threads/malloc.h"
 #include "threads/thread.h"
 #include "filesys/file.h"
@@ -41,6 +42,10 @@ void
 vm_hash_spte_destroy_func (struct hash_elem *e, void *aux){
     struct supp_page_table_entry *spte;
     spte = hash_entry (e, struct supp_page_table_entry, elem);
+    /* Free the swap slot */
+    if (spte->type == VM_ANON && spte->swap_slot != 0) {
+        swap_free(spte->swap_slot);
+    }
 
     free(spte);
 }
@@ -98,7 +103,7 @@ struct supp_page_table_entry *create_anon_spte(void *vaddr)
     spte->offset = 0;
     spte->read_bytes = 0;
     spte->zero_bytes = PGSIZE;
-    // spte->swap_slot = NULL; // not sure what to make this yet
+    spte->swap_slot = NULL;
 
     hash_insert (&thread_current ()->vm, spte);
 
