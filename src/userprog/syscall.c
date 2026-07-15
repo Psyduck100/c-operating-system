@@ -147,6 +147,10 @@ copy_in (void *dst_, const void *usrc_, size_t size)
 static void
 syscall_handler (struct intr_frame *f UNUSED)
 {
+  /*save user stack pointer*/
+  thread_current()->user_esp = f->esp;
+
+
   uint32_t syscall_number;
   int args[3];
 

@@ -11,6 +11,8 @@
 #include "userprog/process.h"
 #include "vm/page.h"
 
+#define MAX_STACK_SIZE 8*1024*1024 //8 mb
+
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
@@ -114,6 +116,17 @@ kill (struct intr_frame *f)
     }
 }
 
+// returns true if the fault addr is a result of stack overflow and meets valid cond
+// for stack growth
+static bool valid_stack_growth (void *fault_addr, void *esp) {
+   if (fault_addr >= PHYS_BASE) return false;
+   if (fault_addr < esp -32) return false;
+   if ((size_t) (PHYS_BASE - pg_round_down(fault_addr)) > MAX_STACK_SIZE) return false;
+   return true;
+
+}
+
+
 /* Helper for page fault to deal with cases involving
    the vm project 3. (list cases later when working)
    Returns true if successfully done and false otherwise*/
@@ -156,15 +169,40 @@ vm_page_fault_helper (struct supp_page_table_entry *spte)
          return false;
       }
 
+
+
       spte->in_memory = true;
 
       return true;
 
    }
 
+   // if ANON just swap in and evict - all handled via frame_allocate
+   if (spte->type == VM_ANON) {
+      void *kpage = frame_allocate(spte, PAL_USER | PAL_ZERO);
+      if (kpage == NULL) return false;
+
+      bool success = install_page (spte->vaddr, kpage, spte->writable);
+
+      if (!success) {
+         frame_free(kpage);
+         return false;
+      }
+
+
+      spte->in_memory = true;
+
+      return true;
+   }
+
    return false;
 
-}
+   }
+
+   struct supp_page_table_entry *expand_stack(void *fault_addr){
+      void *v_page_addr = pg_round_down(fault_addr);
+      return create_anon_spte(v_page_addr);
+   }
 
 /* Page fault handler.  This is a skeleton that must be filled in
    to implement virtual memory.  Some solutions to project 2 may
@@ -206,6 +244,39 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
+
+
+  /*for project 3 if the virtual address does not have a physical
+    mapping (not_present == true) then we call the handler to deal
+    with the cases (i.e swapping, mmap, load the file from disk etc.)*/
+    if (not_present == true){
+
+      /* Look up vm_entry, exit if not found */
+      struct supp_page_table_entry *spte = find_spte(fault_addr);
+      if (spte == NULL){
+
+         void *esp = user ? f->esp : thread_current()->user_esp;
+
+         if (valid_stack_growth(fault_addr, esp)) spte = expand_stack(fault_addr);
+
+         if (spte == NULL) exit(-1);
+      }
+      
+      bool success = vm_page_fault_helper(spte);
+
+      if (!success){
+         exit(-1);
+      }
+      else{
+         return;
+      }
+    }
+
+   else
+   {
+      exit (-1);
+      return;
+   }
   
   /*For method 2 of making sure invalid pointers must be rejected
   without harm to the kernel or other running processes,*/
@@ -229,34 +300,6 @@ page_fault (struct intr_frame *f)
       and freeing memory*/
       return;
    }
-
-  /*for project 3 if the virtual address does not have a physical
-    mapping (not_present == true) then we call the handler to deal
-    with the cases (i.e swapping, mmap, load the file from disk etc.)*/
-    if (not_present == true){
-
-      /* Look up vm_entry, exit if not found */
-      struct supp_page_table_entry *spte = find_spte(fault_addr);
-      if (spte == NULL){
-        exit(-1);
-      }
-      
-      bool success = vm_page_fault_helper(spte);
-
-      if (!success){
-         exit(-1);
-      }
-      else{
-         return;
-      }
-    }
-
-   else
-   {
-      exit (-1);
-      return;
-   }
-
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */

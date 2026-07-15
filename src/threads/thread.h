@@ -127,6 +127,8 @@ struct thread
 
    struct hash vm; /*hash table for the supplemental page table*/
 
+   void *user_esp; /*user stack pointer register so we can detect stack growth */
+
   /* Shared between thread.c and synch.c. */
   struct list_elem elem; /* List element. */
 
