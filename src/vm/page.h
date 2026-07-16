@@ -30,6 +30,8 @@ struct  supp_page_table_entry {
 
     struct hash_elem elem; /*hash element*/
 
+    struct list_elem mmap_elem; /*mmap elem for the mmap list of sptes*/
+
     struct frame *frame;/* frame for the virtual page (need to allocate when frame.h is readded)*/
     int swap_slot /*the place in the swap disk that the page was swapped to*/
     

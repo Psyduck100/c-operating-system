@@ -125,7 +125,7 @@ struct thread
   bool loaded; /* A bool to represent if the thread
                    successfully loaded*/
 
-   struct hash vm; /*hash table for the supplemental page table*/
+   struct hash vm; /*hash table for the supplemental page table*/ 
 
    struct list mmap_list; /*list of memory mapped files*/ 
    mapid_t next_mapid; /*next available mapid for memory mapped files*/

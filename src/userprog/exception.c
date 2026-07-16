@@ -177,6 +177,7 @@ vm_page_fault_helper (struct supp_page_table_entry *spte)
       return true;
 
    }
+
    // if ANON just swap in and evict - all handled via frame_allocate
    if (spte->type == VM_ANON) {
       void *kpage = frame_allocate(spte, PAL_USER | PAL_ZERO);

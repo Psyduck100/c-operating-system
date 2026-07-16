@@ -21,7 +21,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
@@ -335,6 +334,16 @@ process_exit (void)
     }
 
   hash_destroy (&cur->vm, vm_hash_spte_destroy_func);
+  
+  while (!list_empty(&thread_current()->mmap_list)){
+
+    struct mmap_file *cur = list_entry(list_begin(&thread_current()->mmap_list), struct mmap_file, elem);
+    munmap(cur->mapid);
+
+
+  }
+
+
 
   /* Close all open files  */
   if (cur->fd_table != NULL)
