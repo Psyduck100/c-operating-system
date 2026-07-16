@@ -23,7 +23,6 @@ struct  supp_page_table_entry {
     uint32_t read_bytes; /* Number of bytes to read from file */
     uint32_t zero_bytes; /* Remaining bytes at the end of a page to be filled with zeros */
     off_t offset; /* Offset in the file to read from */
-    size_t swap_slot; /* Swap slot number */ 
     
     struct file *file; /* File to read from */
 
@@ -31,6 +30,7 @@ struct  supp_page_table_entry {
 
     struct hash_elem elem; /*hash element*/
 
+    struct frame *frame;/* frame for the virtual page (need to allocate when frame.h is readded)*/
     int swap_slot /*the place in the swap disk that the page was swapped to*/
     
 };
