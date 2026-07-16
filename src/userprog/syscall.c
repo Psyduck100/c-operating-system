@@ -8,6 +8,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/process.h"
+#include "vm/page.h"
 #include <stdio.h>
 #include <syscall-nr.h>
 
@@ -102,6 +103,87 @@ check_buffer (const uint8_t *buffer, size_t size)
           return false;
         }
     }
+
+  return true;
+}
+
+/*pins the physical page/frame related to the page at virtual address vaddr.
+Returns true on success and false on failure.*/
+bool
+pin_page(void *vaddr){
+  struct supp_page_table_entry* spte = find_spte(vaddr);
+
+  if (spte == NULL){
+    return false;
+  }
+
+  if (!spte->in_memory){
+    /*if not in memory use our already created page fault helper to bring it back to memory.
+    Basically demand paging.*/
+    bool success =  vm_page_fault_helper (spte);
+    if (!success){
+      return false;
+    }
+  }
+  
+  spte->frame->pinned = true;
+
+  return true;
+}
+
+
+/*unpins the physical page/frame related to the page at virtual address vaddr.
+Returns true on success and false on failure.*/
+bool
+unpin_page(void *vaddr){
+  struct supp_page_table_entry* spte = find_spte(vaddr);
+
+  if (spte == NULL){
+    return false;
+  }
+
+  /*if we need to unpin a page it should be pinned so there should be a frame and the spte should be
+  in memory. However we keep this for debugging*/
+  if (!spte->in_memory){
+    /*if not in memory use our already created page fault helper to bring it back to memory.
+    Basically demand paging.*/
+    bool success = vm_page_fault_helper (spte);
+    if (!success){
+      return false;
+    }
+  }
+  
+  spte->frame->pinned = false;
+
+  return true;
+}
+
+
+/*pins all pages in the buffer for read and write system calls. Returns true on success
+and a false on failure*/
+bool
+pin_buffer(const uint8_t *buffer, size_t size){
+  uint8_t *cur_addr = buffer;
+
+  while (cur_addr <= (buffer + size - 1)){
+    bool success = pin_page(cur_addr);
+    if (!success) return false;
+    cur_addr += PGSIZE;
+  }
+
+  return true;
+}
+/*unpins all pages in the buffer for read and write system calls. Returns true on success
+and a false on failure*/
+bool
+unpin_buffer(const uint8_t *buffer, size_t size){
+  uint8_t *cur_addr = buffer;
+
+  while (cur_addr <= (buffer + size - 1)){
+    bool success = unpin_page(cur_addr);
+    if (!success) return false;
+    cur_addr += PGSIZE;
+  }
 
   return true;
 }
@@ -232,7 +314,11 @@ syscall_handler (struct intr_frame *f UNUSED)
         exit (-1);
       if (!check_buffer ((uint8_t *)args[1], (size_t)args[2]))
         exit (-1);
+      if(!pin_buffer((uint8_t *)args[1], (size_t)args[2]))
+        exit (-1);
       f->eax = read (args[0], (void *)args[1], (unsigned)args[2]);
+      if(!unpin_buffer((uint8_t *)args[1], (size_t)args[2]))
+        exit (-1);
       break;
 
     case SYS_WRITE:
@@ -241,8 +327,13 @@ syscall_handler (struct intr_frame *f UNUSED)
         exit (-1);
       if (!check_buffer ((uint8_t *)args[1], (size_t)args[2]))
         exit (-1);
+      if(!pin_buffer((uint8_t *)args[1], (size_t)args[2]))
+        exit (-1);
       f->eax = write (args[0], (void *)args[1], (unsigned)args[2]);
+      if(!unpin_buffer((uint8_t *)args[1], (size_t)args[2]))
+        exit (-1);
       break;
+
 
     case SYS_SEEK:
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 2);
