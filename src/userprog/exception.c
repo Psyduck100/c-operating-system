@@ -142,12 +142,13 @@ vm_page_fault_helper (struct supp_page_table_entry *spte)
    }
 
    
-   if (spte->type == VM_BIN){
+   if (spte->type == VM_BIN || spte->type == VM_FILE){
 
       /*page allocation for physical memory*/
       void* kpage = frame_allocate(spte, PAL_USER);
 
-      /*if no physical frame/page left*/
+      /*if no physical frame/page left and frame_allocate did not properly
+      swap out frames to free up space*/
       if (kpage == NULL)
       {
          return false;
@@ -176,12 +177,6 @@ vm_page_fault_helper (struct supp_page_table_entry *spte)
       return true;
 
    }
-
-   /*if its type file use mmap*/
-   if (spte->type == VM_FILE){
-
-   }
-
    // if ANON just swap in and evict - all handled via frame_allocate
    if (spte->type == VM_ANON) {
       void *kpage = frame_allocate(spte, PAL_USER | PAL_ZERO);
