@@ -79,6 +79,7 @@ void *frame_allocate (struct supp_page_table_entry *spte, enum palloc_flags flag
     f->spte = spte;
     f->owning_thread = thread_current();
     f->pinned = false;
+    f->spte->frame = f;
 
     lock_acquire (&frame_table_lock);
     list_push_back(&frame_table, &f->frame_elem);

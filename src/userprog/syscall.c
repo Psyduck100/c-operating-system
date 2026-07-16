@@ -107,83 +107,107 @@ check_buffer (const uint8_t *buffer, size_t size)
   return true;
 }
 
-/*pins the physical page/frame related to the page at virtual address vaddr.
-Returns true on success and false on failure.*/
+/*sets the value of pinned of the physical page/frame related to the page at
+virtual address vaddr to pinned_value. Returns true on success and false on
+failure.*/
 bool
-pin_page(void *vaddr){
-  struct supp_page_table_entry* spte = find_spte(vaddr);
+set_pin_page (void *vaddr, bool pinned_value)
+{
+  struct supp_page_table_entry *spte = find_spte (vaddr);
 
-  if (spte == NULL){
-    return false;
-  }
-
-  if (!spte->in_memory){
-    /*if not in memory use our already created page fault helper to bring it back to memory.
-    Basically demand paging.*/
-    bool success =  vm_page_fault_helper (spte);
-    if (!success){
+  if (spte == NULL)
+    {
       return false;
     }
-  }
-  
+
+  if (!spte->in_memory)
+    {
+      /*if not in memory use our already created page fault helper to bring it
+      back to memory. Basically demand paging.*/
+      bool success = vm_page_fault_helper (spte);
+      if (!success)
+        {
+          return false;
+        }
+    }
+
   spte->frame->pinned = true;
 
   return true;
 }
 
+// /*sets pinned to pinned_value for all pages for a string such as filename or
+// cmdline for system calls. Returns true on success and false on failure*/
+// bool
+// set_pin_string (const char *str, bool pinned_value)
+// {
+//   char *cur_addr = str;
+//   char *start_of_pg = pg_round_down (str);
+//   char *end_of_pg = start_of_pg + PGSIZE;
 
-/*unpins the physical page/frame related to the page at virtual address vaddr.
-Returns true on success and false on failure.*/
+//   bool next_page = true;
+
+//   /*pin the current page with the helper then continue to pin next page if the
+//   string continues to the next page*/
+//   while (next_page == true)
+//     {
+//       bool success = set_pin_page (cur_addr, pinned_value);
+//       if (!success)
+//         return false;
+
+//       /*figure out if the string flows to the next page*/
+//       while (cur_addr < end_of_pg)
+//         {
+
+//           /*need to use get_user as string is in user vm*/
+//           int byte_value = get_user (cur_addr);
+
+//           /*checks if get_user had a segfault*/
+//           if (byte_value == -1)
+//             {
+//               return false;
+//             }
+
+//           /*string ends on this page*/
+//           if (byte_value == '\0')
+//             {
+//               /*will exit loop after this iteration*/
+//               next_page = false;
+//               break;
+//             }
+
+//           cur_addr++;
+//         }
+
+//       cur_addr = pg_round_down (end_of_pg + 1);
+//       start_of_pg = cur_addr;
+//       end_of_pg = start_of_pg + PGSIZE;
+//     }
+
+//   return true;
+// }
+
+/*sets pinned argument to pinned_value for all pages for the buffer for read
+and write system calls. Returns true on success and false on failure*/
 bool
-unpin_page(void *vaddr){
-  struct supp_page_table_entry* spte = find_spte(vaddr);
+set_pin_buffer (const uint8_t *buffer, size_t size, bool pinned_value)
+{
+  uint8_t *cur_addr = buffer;
 
-  if (spte == NULL){
-    return false;
-  }
-
-  /*if we need to unpin a page it should be pinned so there should be a frame and the spte should be
-  in memory. However we keep this for debugging*/
-  if (!spte->in_memory){
-    /*if not in memory use our already created page fault helper to bring it back to memory.
-    Basically demand paging.*/
-    bool success = vm_page_fault_helper (spte);
-    if (!success){
-      return false;
+  if (size == 0)
+    {
+      return true;
     }
-  }
-  
-  spte->frame->pinned = false;
 
-  return true;
-}
-
-
-/*pins all pages in the buffer for read and write system calls. Returns true on success
-and a false on failure*/
-bool
-pin_buffer(const uint8_t *buffer, size_t size){
-  uint8_t *cur_addr = buffer;
-
-  while (cur_addr <= (buffer + size - 1)){
-    bool success = pin_page(cur_addr);
-    if (!success) return false;
-    cur_addr += PGSIZE;
-  }
-
-  return true;
-}
-/*unpins all pages in the buffer for read and write system calls. Returns true on success
-and a false on failure*/
-bool
-unpin_buffer(const uint8_t *buffer, size_t size){
-  uint8_t *cur_addr = buffer;
-
-  while (cur_addr <= (buffer + size - 1)){
-    bool success = unpin_page(cur_addr);
-    if (!success) return false;
-    cur_addr += PGSIZE;
-  }
+  /* loop through all pages/frames and sets all pinned arguments for each page
+  to pinned_value*/
+  while (cur_addr <= (buffer + size - 1))
+    {
+      bool success = set_pin_page (cur_addr, pinned_value);
+      if (!success)
+        return false;
+      cur_addr += PGSIZE;
+    }
 
   return true;
 }
@@ -230,8 +254,7 @@ static void
 syscall_handler (struct intr_frame *f UNUSED)
 {
   /*save user stack pointer*/
-  thread_current()->user_esp = f->esp;
-
+  thread_current ()->user_esp = f->esp;
 
   uint32_t syscall_number;
   int args[3];
@@ -314,10 +337,10 @@ syscall_handler (struct intr_frame *f UNUSED)
         exit (-1);
       if (!check_buffer ((uint8_t *)args[1], (size_t)args[2]))
         exit (-1);
-      if(!pin_buffer((uint8_t *)args[1], (size_t)args[2]))
+      if (!set_pin_buffer ((uint8_t *)args[1], (size_t)args[2], true))
         exit (-1);
       f->eax = read (args[0], (void *)args[1], (unsigned)args[2]);
-      if(!unpin_buffer((uint8_t *)args[1], (size_t)args[2]))
+      if (!set_pin_buffer ((uint8_t *)args[1], (size_t)args[2], false))
         exit (-1);
       break;
 
@@ -327,13 +350,12 @@ syscall_handler (struct intr_frame *f UNUSED)
         exit (-1);
       if (!check_buffer ((uint8_t *)args[1], (size_t)args[2]))
         exit (-1);
-      if(!pin_buffer((uint8_t *)args[1], (size_t)args[2]))
+      if (!set_pin_buffer ((uint8_t *)args[1], (size_t)args[2], true))
         exit (-1);
       f->eax = write (args[0], (void *)args[1], (unsigned)args[2]);
-      if(!unpin_buffer((uint8_t *)args[1], (size_t)args[2]))
+      if (!set_pin_buffer ((uint8_t *)args[1], (size_t)args[2], false))
         exit (-1);
       break;
-
 
     case SYS_SEEK:
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 2);
@@ -604,7 +626,8 @@ close (int fd)
 
 /* Maps the file open as FD into the proccess virtual addr space */
 static mapid_t
-mmap (int fd, void *addr) {
+mmap (int fd, void *addr)
+{
   struct thread *t = thread_current ();
   struct file *f;
   struct mmap_file *mmap;
@@ -612,24 +635,25 @@ mmap (int fd, void *addr) {
   off_t file_len;
   int num_pages;
   void *upage;
-  
+
   /* Validate the fd */
-  if (fd == 0 || fd = 1) {
-    return -1;
-  }
+  if (fd == 0 || fd = 1)
+    {
+      return -1;
+    }
 
   f = get_file (fd);
-  if (f == NULL) {
-    return -1;}
+  if (f == NULL)
+    {
+      return -1;
+    }
 
   /* Validate addr */
-  if (addr == NULL || pg_ofs (addr) != 0) {
-    return -1;
-  }
+  if (addr == NULL || pg_ofs (addr) != 0)
+    {
+      return -1;
+    }
 
   /* Acquire lock to avoid race conditions */
   lock_acquire (&filesys_lock);
-
-
-  
 }
