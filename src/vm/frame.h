@@ -1,6 +1,7 @@
 #include "threads/palloc.h"
-#include "src/lib/kernel/list.h"
-#include "synch.h"
+#include <list.h>
+#include "threads/synch.h"
+#include "userprog/pagedir.h"
 
 
 struct frame {
@@ -12,8 +13,8 @@ struct frame {
   bool pinned;
 };
 
-static struct list frame_table;
-static struct lock frame_table_lock;
+extern struct list frame_table;
+extern struct lock frame_table_lock;
 void frame_table_init(void);
 void *frame_allocate(struct supp_page_table_entry *spte, enum palloc_flags flags);
 void frame_free(void *k_page_addr);

@@ -1,7 +1,16 @@
 #include "frame.h"
-#include "pagedir.h"
-#include "thread.h"
-static struct lcok swap_lock;
+#include "threads/thread.h"
+#include "vm/swap.h"
+#include "devices/block.h"
+#include "lib/kernel/bitmap.h"
+#include <debug.h>
+#include "threads/vaddr.h"
+#include "threads/synch.h"
+
+
+static struct lock swap_lock;
+static struct block *swap_block;
+static struct bitmap *swap_table;
 
 
 /*This function searches through the global frame table to find
@@ -57,8 +66,8 @@ struct frame *get_victim_frame(){
 /* Initializes the swap table bitmap to 0 and the swap lock */
 void
 swap_init () {
-  swapb_block = block_get_role (BLOCK_SWAP);
-  if (swapb_block == NULL)
+  swap_block = block_get_role (BLOCK_SWAP);
+  if (swap_block == NULL)
     exit (1);
 
   size_t swap_sector = block_size (swap_block);
@@ -76,7 +85,7 @@ swap_init () {
 void
 swap_free (size_t swap_slot) {
   lock_acquire (&swap_lock);
-  if (!bitmap_test (swap_table, swap_slot)) {
+  if (bitmap_test (swap_table, swap_slot)) {
     bitmap_set (swap_table, swap_slot, false);
   }
   lock_release (&swap_lock);
@@ -109,7 +118,7 @@ void swap_in (size_t swap_slot, void *kpage) {
   lock_acquire (&swap_lock);
 
   /* Check slot is not empty */
-  if (bitmap_test (swap_table, swap_slot)) {
+  if (!bitmap_test (swap_table, swap_slot)) {
     exit (1);
   }
 

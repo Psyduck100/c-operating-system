@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
@@ -135,7 +136,7 @@ start_process (void *file_name_)
 
   // Free copy
   palloc_free_page (fn_copy);
-  
+
   /*current thread is the child thread from thread exec*/
   struct thread *cur_t = thread_current ();
 
@@ -161,46 +162,51 @@ start_process (void *file_name_)
     {
       // Count tokens to temp copy
       char *count_copy = palloc_get_page (0);
-      if (count_copy == NULL) {
-        palloc_free_page (file_name);
-        thread_exit ();
-      }
+      if (count_copy == NULL)
+        {
+          palloc_free_page (file_name);
+          thread_exit ();
+        }
       strlcpy (count_copy, file_name, PGSIZE);
 
       char *saveptr_count;
       char *token;
       int argc = 0;
-      
-      char *token_count = strtok_r (count_copy, " ", &saveptr_count);
-      while (token_count != NULL) {
-        argc++;
-        token_count = strtok_r (NULL, " ", &saveptr_count);
-      }
-      palloc_free_page (count_copy);
-      
-      // Allocate argv array and user stack address array
-      char **argv = malloc(sizeof(char *) * argc);
-      if (argv == NULL) { 
-        palloc_free_page (file_name);
-        thread_exit ();
-      }
 
-      char *user_stack_address = malloc(sizeof(char *) * argc);
-      if (user_stack_address == NULL) {
-        free(argv);
-        palloc_free_page (file_name);
-        thread_exit ();
-      }
+      char *token_count = strtok_r (count_copy, " ", &saveptr_count);
+      while (token_count != NULL)
+        {
+          argc++;
+          token_count = strtok_r (NULL, " ", &saveptr_count);
+        }
+      palloc_free_page (count_copy);
+
+      // Allocate argv array and user stack address array
+      char **argv = malloc (sizeof (char *) * argc);
+      if (argv == NULL)
+        {
+          palloc_free_page (file_name);
+          thread_exit ();
+        }
+
+      char **user_stack_address = malloc (sizeof (char *) * argc);
+      if (user_stack_address == NULL)
+        {
+          free (argv);
+          palloc_free_page (file_name);
+          thread_exit ();
+        }
 
       // Tokenize the command line arguments
       char *saveptr;
       int index = 0;
       token = strtok_r (file_name, " ", &saveptr);
-      while (token != NULL) {
-        argv[index] = token;
-        index++;
-        token = strtok_r (NULL, " ", &saveptr);
-      }
+      while (token != NULL)
+        {
+          argv[index] = token;
+          index++;
+          token = strtok_r (NULL, " ", &saveptr);
+        }
       argv[argc] = NULL; // Null-terminate the argv array
 
       // Build User Stack: add parsed CLA
@@ -246,8 +252,8 @@ start_process (void *file_name_)
       *(uint32_t *)if_.esp = 0;
 
       // Free allocated memory
-      free(argv);
-      free(user_stack_address);
+      free (argv);
+      free (user_stack_address);
     }
 
   palloc_free_page (file_name);
@@ -333,17 +339,14 @@ process_exit (void)
          until it actually calls thread_exit and is freed later. */
     }
 
+  while (!list_empty (&thread_current ()->mmap_list))
+    {
+
+      struct mmap_file *cur = list_entry (
+          list_begin (&thread_current ()->mmap_list), struct mmap_file, elem);
+      munmap (cur->mapid);
+    }
   hash_destroy (&cur->vm, vm_hash_spte_destroy_func);
-  
-  while (!list_empty(&thread_current()->mmap_list)){
-
-    struct mmap_file *cur = list_entry(list_begin(&thread_current()->mmap_list), struct mmap_file, elem);
-    munmap(cur->mapid);
-
-
-  }
-
-
 
   /* Close all open files  */
   if (cur->fd_table != NULL)
@@ -697,7 +700,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       spte->read_bytes = page_read_bytes;
       spte->zero_bytes = page_zero_bytes;
       spte->in_memory = false;
-      spte->swap_slot = NULL;
+      spte->swap_slot = -1;
 
       /* Insert spte into current threads vm hash table */
       if (!hash_insert (&thread_current ()->vm, &spte->elem))
@@ -753,9 +756,10 @@ setup_stack (void **esp)
           spte->offset = 0;
           spte->read_bytes = 0;
           spte->zero_bytes = PGSIZE;
-          // spte->swap_slot = NULL; // not sure what to make this yet
+          spte->swap_slot = -1;
+          spte->frame = NULL;
 
-          hash_insert (&thread_current ()->vm, spte);
+          hash_insert (&thread_current ()->vm, &spte->elem);
         }
       else
         {

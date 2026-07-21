@@ -43,7 +43,7 @@ vm_hash_spte_destroy_func (struct hash_elem *e, void *aux){
     struct supp_page_table_entry *spte;
     spte = hash_entry (e, struct supp_page_table_entry, elem);
     /* Free the swap slot */
-    if (spte->type == VM_ANON && spte->swap_slot != 0) {
+    if (spte->type == VM_ANON && spte->swap_slot != -1) {
         swap_free(spte->swap_slot);
     }
 
@@ -98,14 +98,15 @@ struct supp_page_table_entry *create_anon_spte(void *vaddr)
     spte->type = VM_ANON;
     spte->vaddr = vaddr;
     spte->writable = true;
-    spte->in_memory = true;
+    spte->in_memory = false;
     spte->file = NULL;
     spte->offset = 0;
     spte->read_bytes = 0;
     spte->zero_bytes = PGSIZE;
-    spte->swap_slot = NULL;
+    spte->swap_slot = -1;
+    spte->frame = NULL;
 
-    hash_insert (&thread_current ()->vm, spte);
+    hash_insert (&thread_current ()->vm, &spte->elem);
 
     return spte;
 

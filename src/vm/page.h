@@ -3,6 +3,8 @@
 #include "filesys/off_t.h"
 #include "threads/palloc.h"
 
+/* Mapid_t def */
+typedef int mapid_t;
 
 /* States the type of vm page*/
 enum vm_page_type
@@ -33,7 +35,7 @@ struct  supp_page_table_entry {
     struct list_elem mmap_elem; /*mmap elem for the mmap list of sptes*/
 
     struct frame *frame;/* frame for the virtual page (need to allocate when frame.h is readded)*/
-    int swap_slot /*the place in the swap disk that the page was swapped to*/
+    int swap_slot; /*the place in the swap disk that the page was swapped to*/
     
 };
 
@@ -54,5 +56,5 @@ struct supp_page_table_entry* find_spte (void *vaddr);
 bool load_file (struct supp_page_table_entry *spte, void *kaddr);
 
 
-struct supp_page_table_entry *create_anon_spte(vaddr);
+struct supp_page_table_entry *create_anon_spte(void *vaddr);
 

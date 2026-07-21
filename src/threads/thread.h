@@ -6,6 +6,8 @@
 #include <list.h>
 #include <stdint.h>
 #include <hash.h>
+#include "userprog/syscall.h"
+#include <syscall-nr.h>
 
 
 /* States in a thread's life cycle. */
@@ -28,6 +30,9 @@ typedef int tid_t;
 #define PRI_MAX 63     /* Highest priority. */
 
 #define MAX_FD 64 /* Maximum number of file descriptors per thread. */
+
+/* Mapid_t def */
+typedef int mapid_t;
 
 /* A kernel thread or user process.
 

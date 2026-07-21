@@ -1,4 +1,5 @@
 #include "userprog/syscall.h"
+#include <stdlib.h>
 
 #include "devices/input.h"
 #include "devices/shutdown.h"
@@ -7,12 +8,12 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/pagedir.h"
 #include "userprog/process.h"
+#include "vm/frame.h"
 #include "vm/page.h"
 #include <stdio.h>
 #include <syscall-nr.h>
-#include "userprog/pagedir.h"
-#include "vm/frame.h"
 
 static void syscall_handler (struct intr_frame *);
 static int get_user (const uint8_t *uaddr);
@@ -29,6 +30,8 @@ static unsigned tell (int fd);
 static void close (int fd);
 static pid_t exec (const char *cmdline);
 static int wait (pid_t pid);
+mapid_t mmap (int fd, void *addr);
+void munmap (mapid_t mapid);
 
 struct lock filesys_lock;
 
@@ -149,9 +152,8 @@ set_pin_page (void *vaddr, bool pinned_value)
 
 //   bool next_page = true;
 
-//   /*pin the current page with the helper then continue to pin next page if the
-//   string continues to the next page*/
-//   while (next_page == true)
+//   /*pin the current page with the helper then continue to pin next page if
+//   the string continues to the next page*/ while (next_page == true)
 //     {
 //       bool success = set_pin_page (cur_addr, pinned_value);
 //       if (!success)
@@ -378,6 +380,22 @@ syscall_handler (struct intr_frame *f UNUSED)
       if (!success)
         exit (-1);
       close (args[0]);
+      break;
+
+    case SYS_MMAP:
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
+      if (!success)
+        exit (-1);
+      mmap (args[0], (void *)args[1]);
+      break;
+
+    case SYS_MUNMAP:
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
+      if (!success)
+        exit (-1);
+      if (!check_pointer ((uint8_t *)args[0]))
+        exit (-1);
+      munmap ((mapid_t)args[0]);
       break;
 
     default:
@@ -627,9 +645,10 @@ close (int fd)
 }
 
 /* Maps the file open as FD into the proccess virtual addr space */
-static mapid_t mmap (int fd, void *addr)
+mapid_t
+mmap (int fd, void *addr)
 {
-  ASSERT(((uintptr_t) addr) % PGSIZE == 0);
+  ASSERT (((uintptr_t)addr) % PGSIZE == 0);
 
   struct thread *t = thread_current ();
   struct file *f;
@@ -663,148 +682,147 @@ static mapid_t mmap (int fd, void *addr)
   /*indep file ref so if other processes close the fd doesnt
   intefere with us*/
 
-  struct file *f2 = file_reopen(f);
+  struct file *f2 = file_reopen (f);
 
-  off_t size = file_length(f2);
-  
-  lock_release(&filesys_lock);
-  if(size == 0){
-    lock_acquire (&filesys_lock);
+  off_t size = file_length (f2);
 
-    file_close(f2);
-    lock_release(&filesys_lock);
-
-    return -1;
-  }
-
-
-  //compute how many pages file needs
-  int pages_needed = (size + PGSIZE - 1) / PGSIZE;
-
-  //check the number of consecutive sptes are free
-  for (int i = 0; i < pages_needed; i++){
-    void *v_page_addr = addr + i*PGSIZE;
-
-    if (find_spte(v_page_addr) != NULL) {
+  lock_release (&filesys_lock);
+  if (size == 0)
+    {
       lock_acquire (&filesys_lock);
 
-      file_close(f2);
-      lock_release(&filesys_lock);
+      file_close (f2);
+      lock_release (&filesys_lock);
 
       return -1;
     }
 
+  // compute how many pages file needs
+  int pages_needed = (size + PGSIZE - 1) / PGSIZE;
 
+  // check the number of consecutive sptes are free
+  for (int i = 0; i < pages_needed; i++)
+    {
+      void *v_page_addr = addr + i * PGSIZE;
 
-  }
+      if (find_spte (v_page_addr) != NULL)
+        {
+          lock_acquire (&filesys_lock);
 
-  //create mmap struct for tracking
+          file_close (f2);
+          lock_release (&filesys_lock);
+
+          return -1;
+        }
+    }
+
+  // create mmap struct for tracking
   struct mmap_file *mf = malloc (sizeof (struct mmap_file));
-  if (mf == NULL) {
-    lock_acquire (&filesys_lock);
-    file_close(f2);
-    lock_release(&filesys_lock);
+  if (mf == NULL)
+    {
+      lock_acquire (&filesys_lock);
+      file_close (f2);
+      lock_release (&filesys_lock);
 
-    return -1;
-  }
+      return -1;
+    }
 
-  mf->mapid = thread_current()->next_mapid++;
+  mf->mapid = thread_current ()->next_mapid++;
   mf->file = f2;
-  list_init(&mf->spte_list);
+  list_init (&mf->spte_list);
 
   /*create the spte's, 1 per page needed, keep track of the file offset
   and calculate the read and zero bytes using total file length and
   already "allocated" amt*/
   off_t offset = 0;
 
-  for (int i = 0; i < pages_needed; i++){
-    void *v_page_addr = addr + i*PGSIZE;
-    size_t read_bytes = (size - offset < PGSIZE) ? size - offset : PGSIZE;
-    size_t zero_bytes = PGSIZE - read_bytes;
+  for (int i = 0; i < pages_needed; i++)
+    {
+      void *v_page_addr = addr + i * PGSIZE;
+      size_t read_bytes = (size - offset < PGSIZE) ? size - offset : PGSIZE;
+      size_t zero_bytes = PGSIZE - read_bytes;
 
+      struct supp_page_table_entry *spte
+          = malloc (sizeof (struct supp_page_table_entry));
+      spte->type = VM_FILE;
+      spte->file = f2;
+      spte->read_bytes = read_bytes;
+      spte->zero_bytes = zero_bytes;
+      spte->offset = offset;
+      spte->in_memory = false;
+      spte->vaddr = v_page_addr;
+      spte->writable = true;
+      spte->frame = NULL;
+      spte->swap_slot = -1;
 
-    struct supp_page_table_entry *spte = malloc(sizeof (struct supp_page_table_entry));
-    spte->type = VM_FILE;
-    spte->file = f2;
-    spte->read_bytes = read_bytes;
-    spte->zero_bytes = zero_bytes;
-    spte->offset = offset;
-    spte->in_memory = false;
-    spte->vaddr = v_page_addr;
-    spte->writable = true;
+      hash_insert (&thread_current ()->vm, &spte->elem);
+      list_push_back (&mf->spte_list, &spte->mmap_elem);
 
+      offset += PGSIZE;
+    }
 
-    hash_insert(&thread_current()->vm, &spte->elem);
-    list_push_back(&mf->spte_list, &spte->mmap_elem);
-
-    offset += PGSIZE;
-
-  }
-
-  list_push_back(&thread_current()->mmap_list, &mf->elem);
+  list_push_back (&thread_current ()->mmap_list, &mf->elem);
   return mf->mapid;
-
-
-
 }
 
-
-void munmap(mapid_t mapid){
+void
+munmap (mapid_t mapid)
+{
 
   struct mmap_file *mf = NULL;
   struct list_elem *e = NULL;
-  //find if matching mapid exists in our thread
-  for (e = list_begin(&thread_current()->mmap_list); e != list_end(&thread_current()->mmap_list); e = list_next(e)){
-    struct mmap_file *cur = list_entry(e, struct mmap_file, elem);
-    if (cur->mapid == mapid){
-      mf = cur;
-      break;
+  // find if matching mapid exists in our thread
+  for (e = list_begin (&thread_current ()->mmap_list);
+       e != list_end (&thread_current ()->mmap_list); e = list_next (e))
+    {
+      struct mmap_file *cur = list_entry (e, struct mmap_file, elem);
+      if (cur->mapid == mapid)
+        {
+          mf = cur;
+          break;
+        }
+    }
+  // if not return
+  if (mf == NULL)
+    return;
+
+  // iterate through all the spte's belonging to that mf
+  for (e = list_begin (&mf->spte_list); e != list_end (&mf->spte_list);
+       e = list_next (e))
+    {
+
+      struct supp_page_table_entry *cur
+          = list_entry (e, struct supp_page_table_entry, mmap_elem);
+
+      // if our spte is in memory, and page is dirty, we need to write
+      if (cur->in_memory == true)
+        {
+          if (pagedir_is_dirty (thread_current ()->pagedir, cur->vaddr))
+            {
+
+              lock_acquire (&filesys_lock);
+
+              file_write_at (mf->file, cur->vaddr, cur->read_bytes,
+                             cur->offset);
+              lock_release (&filesys_lock);
+            }
+
+          void *k_page_addr
+              = pagedir_get_page (thread_current ()->pagedir, cur->vaddr);
+          pagedir_clear_page (thread_current ()->pagedir, cur->vaddr);
+          frame_free (k_page_addr);
+        }
+
+      // free the spte and delete from thread
+      hash_delete (&thread_current ()->vm, &cur->elem);
+      free (cur);
     }
 
-  }
-  //if not return
-  if (mf == NULL) return;
-
-
-  //iterate through all the spte's belonging to that mf
-  for (e = list_begin(&mf->spte_list); e != list_end(&mf->spte_list); e = list_next(e)){
-    
-    struct supp_page_table_entry *cur = list_entry(e, struct supp_page_table_entry, mmap_elem);
-
-    //if our spte is in memory, and page is dirty, we need to write 
-    if (cur->in_memory == true){
-      if (pagedir_is_dirty(thread_current()->pagedir, cur->vaddr)){
-
-        lock_acquire (&filesys_lock);
-
-        file_write_at (mf->file, cur->vaddr, cur->read_bytes, cur->offset);
-        lock_release(&filesys_lock);
-
-
-      } 
-
-      void *k_page_addr = pagedir_get_page(thread_current()->pagedir, cur->vaddr);
-      pagedir_clear_page(thread_current()->pagedir, cur->vaddr);
-      frame_free(k_page_addr);
-
-
-
-    }
-
-    //free the spte and delete from thread
-    hash_delete(&thread_current()->vm, &cur->elem);
-    free(cur);
-
-  }
-
-  //clean up mmap_file struct and open files
+  // clean up mmap_file struct and open files
   lock_acquire (&filesys_lock);
-  file_close(mf->file);
-  lock_release(&filesys_lock);
+  file_close (mf->file);
+  lock_release (&filesys_lock);
 
-  list_remove(&mf->elem);
-  free(mf);
-
-  
-
+  list_remove (&mf->elem);
+  free (mf);
 }

@@ -1,4 +1,6 @@
 #include "userprog/exception.h"
+#include <string.h>
+#include "userprog/process.h"
 #include "vm/page.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
@@ -9,7 +11,6 @@
 #include <stdio.h>
 #include "threads/palloc.h"
 #include "userprog/process.h"
-#include "vm/page.h"
 #include "vm/swap.h"
 #include "vm/frame.h"
 
@@ -132,7 +133,7 @@ static bool valid_stack_growth (void *fault_addr, void *esp) {
 /* Helper for page fault to deal with cases involving
    the vm project 3. (list cases later when working)
    Returns true if successfully done and false otherwise*/
-static bool
+bool
 vm_page_fault_helper (struct supp_page_table_entry *spte)
 {  
    /*if the supp_page_table_entry spte already has a physical frame
