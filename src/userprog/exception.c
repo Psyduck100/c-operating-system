@@ -1,27 +1,30 @@
 #include "userprog/exception.h"
-#include <string.h>
-#include "userprog/process.h"
-#include "vm/page.h"
 #include "threads/interrupt.h"
+#include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/gdt.h"
-#include "userprog/syscall.h"
-#include <inttypes.h>
-#include <stdio.h>
-#include "threads/palloc.h"
 #include "userprog/process.h"
-#include "vm/swap.h"
+#include "userprog/syscall.h"
 #include "vm/frame.h"
+#include "vm/page.h"
+#include "vm/swap.h"
+#include <inttypes.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
 
-#define MAX_STACK_SIZE 8*1024*1024 //8 mb
+#define MAX_STACK_SIZE 8 * 1024 * 1024 // 8 mb
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
+extern bool install_page (void *upage, void *kpage, bool writable);
 static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
 
+struct supp_page_table_entry *expand_stack (void *fault_addr);
+bool vm_page_fault_helper (struct supp_page_table_entry *spte);
 /* Registers handlers for interrupts that can be caused by user
    programs.
 
@@ -119,103 +122,113 @@ kill (struct intr_frame *f)
     }
 }
 
-// returns true if the fault addr is a result of stack overflow and meets valid cond
-// for stack growth
-static bool valid_stack_growth (void *fault_addr, void *esp) {
-   if (fault_addr >= PHYS_BASE) return false;
-   if (fault_addr < esp -32) return false;
-   if ((size_t) (PHYS_BASE - pg_round_down(fault_addr)) > MAX_STACK_SIZE) return false;
-   return true;
-
+// returns true if the fault addr is a result of stack overflow and meets valid
+// cond for stack growth
+static bool
+valid_stack_growth (void *fault_addr, void *esp)
+{
+  if (fault_addr >= PHYS_BASE)
+    return false;
+  if (fault_addr < esp - 32)
+    return false;
+  if ((size_t)(PHYS_BASE - pg_round_down (fault_addr)) > MAX_STACK_SIZE)
+    return false;
+  return true;
 }
-
 
 /* Helper for page fault to deal with cases involving
    the vm project 3. (list cases later when working)
    Returns true if successfully done and false otherwise*/
 bool
 vm_page_fault_helper (struct supp_page_table_entry *spte)
-{  
-   /*if the supp_page_table_entry spte already has a physical frame
-     then we don't do anything*/
-   if (spte->in_memory){
+{
+  /*if the supp_page_table_entry spte already has a physical frame
+    then we don't do anything*/
+  if (spte->in_memory)
+    {
       return true;
-   }
+    }
 
-   
-   if (spte->type == VM_BIN || spte->type == VM_FILE){
+  if (spte->type == VM_BIN || spte->type == VM_FILE)
+    {
 
       /*page allocation for physical memory*/
-      void* kpage = frame_allocate(spte, PAL_USER);
+      void *kpage = frame_allocate (spte, PAL_USER);
 
       /*if no physical frame/page left and frame_allocate did not properly
       swap out frames to free up space*/
       if (kpage == NULL)
-      {
-         return false;
-      }
-      
+        {
+
+          return false;
+        }
+
       bool success = load_file (spte, kpage);
 
       if (!success)
-      {
-         frame_free(kpage);
-         return false;
-      }
+        {
+
+          frame_free (kpage);
+          return false;
+        }
 
       /*Create mapping between user virtual address to the kernel virtual
         address (physical frame)*/
       success = install_page (spte->vaddr, kpage, spte->writable);
 
       if (!success)
-      {
-         frame_free(kpage);
-         return false;
-      }
+        {
+
+          frame_free (kpage);
+          return false;
+        }
 
       spte->in_memory = true;
 
       return true;
+    }
 
-   }
-
-   // if ANON just swap in and evict - all handled via frame_allocate
-   if (spte->type == VM_ANON) {
-      void *kpage = frame_allocate(spte, PAL_USER | PAL_ZERO);
-      if (kpage == NULL) return false;
+  // if ANON just swap in and evict - all handled via frame_allocate
+  if (spte->type == VM_ANON)
+    {
+      void *kpage = frame_allocate (spte, PAL_USER | PAL_ZERO);
+      if (kpage == NULL)
+        return false;
 
       /* If page was swapped out */
-      if (spte->swap_slot != -1) {
-         swap_in(spte->swap_slot, kpage);
-         spte->swap_slot=-1;
-      }
+      if (spte->swap_slot != -1)
+        {
+          swap_in (spte->swap_slot, kpage);
+          spte->swap_slot = -1;
+        }
       /* Else new page with 0's */
-      else {
-         memset(kpage, 0, PGSIZE);
-      }
+      else
+        {
+          memset (kpage, 0, PGSIZE);
+        }
 
       bool success = install_page (spte->vaddr, kpage, spte->writable);
 
-      if (!success) {
-         frame_free(kpage);
-         return false;
-      }
-
+      if (!success)
+        {
+          frame_free (kpage);
+          return false;
+        }
 
       spte->in_memory = true;
 
       return true;
-   }
+    }
 
+  return false;
+}
 
-   return false;
-
-   }
-
-   struct supp_page_table_entry *expand_stack(void *fault_addr){
-      void *v_page_addr = pg_round_down(fault_addr);
-      return create_anon_spte(v_page_addr);
-   }
+struct supp_page_table_entry *
+expand_stack (void *fault_addr)
+{
+  void *v_page_addr = pg_round_down (fault_addr);
+  return create_anon_spte (v_page_addr);
+}
 
 /* Page fault handler.  This is a skeleton that must be filled in
    to implement virtual memory.  Some solutions to project 2 may
@@ -227,98 +240,73 @@ vm_page_fault_helper (struct supp_page_table_entry *spte)
    example code here shows how to parse that information.  You
    can find more information about both of these in the
    description of "Interrupt 14--Page Fault Exception (#PF)" in
-   [IA32-v3a] section 5.15 "Exception and Interrupt Reference". */
+*/
 static void
 page_fault (struct intr_frame *f)
 {
-  bool not_present; /* True: not-present page, false: writing r/o page. */
-  bool write;       /* True: access was write, false: access was read. */
-  bool user;        /* True: access by user, false: access by kernel. */
-  void *fault_addr; /* Fault address. */
+  bool not_present;
+  bool write;
+  bool user;
+  void *fault_addr;
 
-  /* Obtain faulting address, the virtual address that was
-     accessed to cause the fault.  It may point to code or to
-     data.  It is not necessarily the address of the instruction
-     that caused the fault (that's f->eip).
-     See [IA32-v2a] "MOV--Move to/from Control Registers" and
-     [IA32-v3a] 5.15 "Interrupt 14--Page Fault Exception
-     (#PF)". */
   asm ("movl %%cr2, %0" : "=r"(fault_addr));
-
-  /* Turn interrupts back on (they were only off so that we could
-     be assured of reading CR2 before it changed). */
   intr_enable ();
-
-  /* Count page faults. */
   page_fault_cnt++;
 
-  /* Determine cause. */
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-
-
   /*for project 3 if the virtual address does not have a physical
-    mapping (not_present == true) then we call the handler to deal
-    with the cases (i.e swapping, mmap, load the file from disk etc.)*/
-    if (not_present == true){
+      mapping (not_present == true) then we call the handler to deal
+      with the cases (i.e swapping, mmap, load the file from disk etc.)*/
+  if (not_present)
+    {
+      struct supp_page_table_entry *spte = find_spte (fault_addr);
+      if (spte == NULL)
+        {
+          void *esp = user ? f->esp : thread_current ()->user_esp;
+          if (valid_stack_growth (fault_addr, esp))
+            spte = expand_stack (fault_addr);
+        }
 
-      /* Look up vm_entry, exit if not found */
-      struct supp_page_table_entry *spte = find_spte(fault_addr);
-      if (spte == NULL){
-
-         void *esp = user ? f->esp : thread_current()->user_esp;
-
-         if (valid_stack_growth(fault_addr, esp)) spte = expand_stack(fault_addr);
-
-         if (spte == NULL) exit(-1);
-      }
-      
-      bool success = vm_page_fault_helper(spte);
-
-      if (!success){
-         exit(-1);
-      }
-      else{
-         return;
-      }
+      if (spte != NULL)
+        {
+          if (vm_page_fault_helper (spte))
+            return; /* page successfully loaded */
+        }
     }
 
-   else
-   {
-      exit (-1);
-      return;
-   }
-  
   /*For method 2 of making sure invalid pointers must be rejected
-  without harm to the kernel or other running processes,*/
-   if (user == false && fault_addr < PHYS_BASE)
+    without harm to the kernel or other running processes,*/
+  if (!user && fault_addr < PHYS_BASE)
     {
-
       /*This is to make sure that we don't leak resources
-      when checking for invalid pointers. After doing get_user
-      or put_user if there is a fault we need to recover from
-      it. We set f->eip to f->epx to basically skip the portion
-      that caused the page fault so we can do things such as
-      releasing locks or free memory. We set f->eax to
-      0xffffffff (which is -1) so when we return from page_fault()
-      and go back to get_user() or put_user() they will correctly
-      return -1 and false respectively on failure. Then after
-      resources are properly sorted the processes can be terminated*/
+        when checking for invalid pointers. After doing get_user
+        or put_user if there is a fault we need to recover from
+        it. We set f->eip to f->epx to basically skip the portion
+        that caused the page fault so we can do things such as
+        releasing locks or free memory. We set f->eax to
+        0xffffffff (which is -1) so when we return from page_fault()
+        and go back to get_user() or put_user() they will correctly
+        return -1 and false respectively on failure. Then after
+        resources are properly sorted the processes can be terminated*/
       f->eip = (void *)f->eax;
       f->eax = 0xffffffff;
 
       /*return so we don't kill the process before releasing locks
-      and freeing memory*/
+        and freeing memory*/
       return;
-   }
+    }
+
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
   printf ("Page fault at %p: %s error %s page in %s context.\n", fault_addr,
           not_present ? "not present" : "rights violation",
           write ? "writing" : "reading", user ? "user" : "kernel");
-  kill (f);
+  if (user)
+    exit (-1);
+  else
+    kill (f);
 }
-

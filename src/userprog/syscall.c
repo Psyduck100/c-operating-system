@@ -1,19 +1,20 @@
 #include "userprog/syscall.h"
-#include "userprog/exception.h"
-#include <stdlib.h>
-#include "threads/malloc.h"
 #include "devices/input.h"
 #include "devices/shutdown.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/exception.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
 #include "vm/frame.h"
 #include "vm/page.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <syscall-nr.h>
 
 static void syscall_handler (struct intr_frame *);
@@ -34,7 +35,9 @@ static int wait (pid_t pid);
 mapid_t mmap (int fd, void *addr);
 void munmap (mapid_t mapid);
 static bool check_buffer_writable (const uint8_t *buffer, size_t size);
-
+static bool set_pin_page (const void *vaddr, bool pinned_value);
+static bool set_pin_buffer (const uint8_t *buffer, size_t size,
+                            bool pinned_value);
 
 struct lock filesys_lock;
 
@@ -115,8 +118,8 @@ check_buffer (const uint8_t *buffer, size_t size)
   return true;
 }
 
-/*checks if the pages for a buffer is writable. Returns true if all 
-pages in buffer are writable and false otherwise. Created to make 
+/*checks if the pages for a buffer is writable. Returns true if all
+pages in buffer are writable and false otherwise. Created to make
 sure file_read does not page fault while holding the filesys lock*/
 static bool
 check_buffer_writable (const uint8_t *buffer, size_t size)
@@ -128,14 +131,15 @@ check_buffer_writable (const uint8_t *buffer, size_t size)
     {
       return false;
     }
-  if (size == 0 ){
-    return true;
-  }
+  if (size == 0)
+    {
+      return true;
+    }
 
   while (ptr < buffer + size)
     {
-      struct supp_page_table_entry * spte = find_spte (ptr);
-      if (spte ==  NULL || spte->writable == false) 
+      struct supp_page_table_entry *spte = find_spte (ptr);
+      if (spte == NULL || spte->writable == false)
         return false;
 
       ptr += PGSIZE;
@@ -147,8 +151,8 @@ check_buffer_writable (const uint8_t *buffer, size_t size)
 /*sets the value of pinned of the physical page/frame related to the page at
 virtual address vaddr to pinned_value. Returns true on success and false on
 failure.*/
-bool
-set_pin_page (void *vaddr, bool pinned_value)
+static bool
+set_pin_page (const void *vaddr, bool pinned_value)
 {
   struct supp_page_table_entry *spte = find_spte (vaddr);
 
@@ -225,7 +229,7 @@ set_pin_page (void *vaddr, bool pinned_value)
 
 /*sets pinned argument to pinned_value for all pages for the buffer for read
 and write system calls. Returns true on success and false on failure*/
-bool
+static bool
 set_pin_buffer (const uint8_t *buffer, size_t size, bool pinned_value)
 {
   const uint8_t *cur_addr = buffer;
@@ -426,8 +430,6 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_MUNMAP:
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
       if (!success)
-        exit (-1);
-      if (!check_pointer ((uint8_t *)args[0]))
         exit (-1);
       munmap ((mapid_t)args[0]);
       break;
@@ -678,133 +680,156 @@ close (int fd)
   lock_release (&filesys_lock);
 }
 
-/* Maps the file open as FD into the proccess virtual addr space */
 mapid_t
 mmap (int fd, void *addr)
 {
-  // ASSERT (((uintptr_t)addr) % PGSIZE == 0);
+  // not 4 bit aligned
 
-
-  //not 4 bit aligned
-  if (((uintptr_t)addr) % PGSIZE != 0){
-    return MAP_FAILED;
-  }
-
-  struct thread *t = thread_current ();
-  struct file *f;
-  struct mmap_file *mmap;
-  struct list_elem *e;
-  off_t file_len;
-  int num_pages;
-  void *upage;
+  if (((uintptr_t)addr) % PGSIZE != 0)
+    {
+      return MAP_FAILED;
+    }
 
   /* Validate the fd */
+
   if (fd == 0 || fd == 1)
     {
       return MAP_FAILED;
     }
 
-  f = get_file (fd);
+  struct thread *t = thread_current ();
+  struct file *f = get_file (fd);
   if (f == NULL)
     {
       return MAP_FAILED;
     }
-
   /* Validate addr */
+
   if (addr == NULL || pg_ofs (addr) != 0)
     {
       return MAP_FAILED;
     }
-
   /* Acquire lock to avoid race conditions */
+
   lock_acquire (&filesys_lock);
-
   /*indep file ref so if other processes close the fd doesnt
-  intefere with us*/
-
+    intefere with us*/
   struct file *f2 = file_reopen (f);
+  if (f2 == NULL)
+    {
+      lock_release (&filesys_lock);
+      return MAP_FAILED;
+    }
 
   off_t size = file_length (f2);
-
   lock_release (&filesys_lock);
   if (size == 0)
     {
       lock_acquire (&filesys_lock);
-
       file_close (f2);
       lock_release (&filesys_lock);
-
       return MAP_FAILED;
     }
 
   // compute how many pages file needs
-  int pages_needed = (size + PGSIZE - 1) / PGSIZE;
 
+  int pages_needed = (size + PGSIZE - 1) / PGSIZE;
   // check the number of consecutive sptes are free
+
   for (int i = 0; i < pages_needed; i++)
     {
-      void *v_page_addr = (uintptr_t)addr + i * PGSIZE;
-
+      void *v_page_addr = (uint8_t *)addr + i * PGSIZE;
       if (find_spte (v_page_addr) != NULL)
         {
           lock_acquire (&filesys_lock);
-
           file_close (f2);
           lock_release (&filesys_lock);
-
           return MAP_FAILED;
         }
     }
 
   // create mmap struct for tracking
+
   struct mmap_file *mf = malloc (sizeof (struct mmap_file));
   if (mf == NULL)
     {
       lock_acquire (&filesys_lock);
       file_close (f2);
       lock_release (&filesys_lock);
-
       return MAP_FAILED;
     }
 
-  mf->mapid = thread_current ()->next_mapid++;
+  mf->mapid = t->next_mapid++;
   mf->file = f2;
   list_init (&mf->spte_list);
 
   /*create the spte's, 1 per page needed, keep track of the file offset
-  and calculate the read and zero bytes using total file length and
-  already "allocated" amt*/
+    and calculate the read and zero bytes using total file length and
+    already "allocated" amt*/
   off_t offset = 0;
-
   for (int i = 0; i < pages_needed; i++)
     {
-      void *v_page_addr = (uintptr_t) addr + i * PGSIZE;
+      void *v_page_addr = (uint8_t *)addr + i * PGSIZE;
       size_t read_bytes = (size - offset < PGSIZE) ? size - offset : PGSIZE;
       size_t zero_bytes = PGSIZE - read_bytes;
 
-      struct supp_page_table_entry *spte
-          = malloc (sizeof (struct supp_page_table_entry));
+      struct supp_page_table_entry *spte = malloc (sizeof (*spte));
+      if (spte == NULL)
+        {
+          /* undo previous SPTEs */
+          while (!list_empty (&mf->spte_list))
+            {
+              struct list_elem *el = list_pop_front (&mf->spte_list);
+              struct supp_page_table_entry *old
+                  = list_entry (el, struct supp_page_table_entry, mmap_elem);
+              hash_delete (&t->vm, &old->elem);
+              free (old);
+            }
+          free (mf);
+          lock_acquire (&filesys_lock);
+          file_close (f2);
+          lock_release (&filesys_lock);
+          return MAP_FAILED;
+        }
+
+      memset (spte, 0, sizeof (*spte));
+
       spte->type = VM_FILE;
       spte->file = f2;
       spte->read_bytes = read_bytes;
       spte->zero_bytes = zero_bytes;
       spte->offset = offset;
-      spte->in_memory = false;
       spte->vaddr = v_page_addr;
       spte->writable = true;
-      spte->frame = NULL;
+      spte->in_memory = false;
       spte->swap_slot = -1;
 
-      hash_insert (&thread_current ()->vm, &spte->elem);
+      if (hash_insert (&t->vm, &spte->elem) != NULL)
+        {
+          free (spte);
+          /* Clean up all previously created SPTEs */
+          while (!list_empty (&mf->spte_list))
+            {
+              struct list_elem *el = list_pop_front (&mf->spte_list);
+              struct supp_page_table_entry *old
+                  = list_entry (el, struct supp_page_table_entry, mmap_elem);
+              hash_delete (&t->vm, &old->elem);
+              free (old);
+            }
+          free (mf);
+          lock_acquire (&filesys_lock);
+          file_close (f2);
+          lock_release (&filesys_lock);
+          return MAP_FAILED;
+        }
       list_push_back (&mf->spte_list, &spte->mmap_elem);
 
-      offset += PGSIZE;
+      offset += read_bytes;
     }
 
-  list_push_back (&thread_current ()->mmap_list, &mf->elem);
+  list_push_back (&t->mmap_list, &mf->elem);
   return mf->mapid;
 }
-
 void
 munmap (mapid_t mapid)
 {
@@ -828,13 +853,13 @@ munmap (mapid_t mapid)
 
   // iterate through all the spte's belonging to that mf
   e = list_begin (&mf->spte_list);
-  while (e != list_end (&mf->spte_list)){
-    
+  while (e != list_end (&mf->spte_list))
+    {
 
       struct supp_page_table_entry *cur
           = list_entry (e, struct supp_page_table_entry, mmap_elem);
-          
-       e = list_next (e);
+
+      e = list_next (e);
 
       // if our spte is in memory, and page is dirty, we need to write
       if (cur->in_memory == true)

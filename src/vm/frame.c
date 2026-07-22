@@ -1,5 +1,5 @@
-#include "frame.h"
 #include "filesys/file.h"
+#include "frame.h"
 #include "swap.h"
 #include "threads/malloc.h"
 #include "threads/palloc.h"
@@ -76,8 +76,10 @@ frame_allocate (struct supp_page_table_entry *spte, enum palloc_flags flags)
           victim->spte->swap_slot = swap_slot;
         }
 
-      /*free the frame*/
-      frame_free (victim->k_page_addr);
+      /*free the frame's physical page and its tracking struct directly
+    (the frame was already removed from the frame table by get_victim_frame) */
+      palloc_free_page (victim->k_page_addr);
+      free (victim);
 
       /*re get a page after we evicted one*/
       k_page_addr = palloc_get_page (PAL_USER | flags);
@@ -97,7 +99,6 @@ frame_allocate (struct supp_page_table_entry *spte, enum palloc_flags flags)
   f->owning_thread = thread_current ();
   f->pinned = false;
   f->spte->frame = f;
-  f->spte->in_memory = true;
 
   lock_acquire (&frame_table_lock);
   list_push_back (&frame_table, &f->frame_elem);
@@ -106,8 +107,8 @@ frame_allocate (struct supp_page_table_entry *spte, enum palloc_flags flags)
   return k_page_addr;
 }
 
-
-/*Frees the frame that lives at the physical memory mapped to the kernal address*/
+/*Frees the frame that lives at the physical memory mapped to the kernal
+ * address*/
 void
 frame_free (void *k_page_addr)
 {

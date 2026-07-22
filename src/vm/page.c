@@ -8,7 +8,6 @@
 #include "vm/swap.h"
 #include <string.h>
 
-
 extern struct list frame_table;
 extern struct lock frame_table_lock;
 
@@ -16,8 +15,8 @@ extern struct lock frame_table_lock;
 unsigned
 vm_hash_spte (const struct hash_elem *e, void *aux)
 {
+  (void)aux;
   struct supp_page_table_entry *spte;
-  ((uint8_t *)PHYS_BASE) - PGSIZE;
   spte = hash_entry (e, struct supp_page_table_entry, elem);
   return hash_bytes (&spte->vaddr, sizeof (spte->vaddr));
 }
@@ -30,6 +29,7 @@ bool
 vm_hash_spte_less_func (const struct hash_elem *a, const struct hash_elem *b,
                         void *aux)
 {
+  (void)aux;
   struct supp_page_table_entry *spteA;
   spteA = hash_entry (a, struct supp_page_table_entry, elem);
 
@@ -44,6 +44,7 @@ vm_hash_spte_less_func (const struct hash_elem *a, const struct hash_elem *b,
 void
 vm_hash_spte_destroy_func (struct hash_elem *e, void *aux)
 {
+  (void)aux;
   struct supp_page_table_entry *spte;
   spte = hash_entry (e, struct supp_page_table_entry, elem);
   /* Free the swap slot */
@@ -63,7 +64,7 @@ vm_hash_spte_destroy_func (struct hash_elem *e, void *aux)
 /* Searches the hash table for a spte with address VADDR
     and returns a pointer to it */
 struct supp_page_table_entry *
-find_spte (void *vaddr)
+find_spte (const void *vaddr)
 {
   struct supp_page_table_entry spte;
   struct hash_elem *e;
