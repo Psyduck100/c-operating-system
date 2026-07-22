@@ -7,7 +7,6 @@
 #include "userprog/pagedir.h"
 #include "vm/page.h"
 
-
 struct list frame_table;
 struct lock frame_table_lock;
 
@@ -107,6 +106,8 @@ frame_allocate (struct supp_page_table_entry *spte, enum palloc_flags flags)
   return k_page_addr;
 }
 
+
+/*Frees the frame that lives at the physical memory mapped to the kernal address*/
 void
 frame_free (void *k_page_addr)
 {
@@ -121,8 +122,13 @@ frame_free (void *k_page_addr)
       if (f->k_page_addr == k_page_addr)
         {
 
-          f->spte->frame = NULL;
-          f->spte->in_memory = false;
+          if (f->spte != NULL)
+            {
+              f->spte->frame = NULL;
+              f->spte->in_memory = false;
+
+              pagedir_clear_page (f->owning_thread->pagedir, f->spte->vaddr);
+            }
 
           list_remove (cur);
           free (f);
@@ -131,4 +137,39 @@ frame_free (void *k_page_addr)
     }
   lock_release (&frame_table_lock);
   palloc_free_page (k_page_addr);
+}
+
+void
+free_all_proccess_frames ()
+{
+  lock_acquire (&frame_table_lock);
+
+  struct list_elem *cur = list_begin (&frame_table);
+
+  while (cur != list_end (&frame_table))
+    {
+      struct frame *f = list_entry (cur, struct frame, frame_elem);
+
+      struct list_elem *next_frame = list_next (cur);
+      if (f->owning_thread == thread_current ())
+        {
+
+          f->spte->frame = NULL;
+          f->spte->in_memory = false;
+          if (f->spte != NULL)
+            {
+              pagedir_clear_page (f->owning_thread->pagedir, f->spte->vaddr);
+            }
+
+          void *k_page_addr = f->k_page_addr;
+
+          list_remove (cur);
+          free (f);
+
+          palloc_free_page (k_page_addr);
+        }
+
+      cur = next_frame;
+    }
+  lock_release (&frame_table_lock);
 }

@@ -185,9 +185,9 @@ vm_page_fault_helper (struct supp_page_table_entry *spte)
       if (kpage == NULL) return false;
 
       /* If page was swapped out */
-      if (spte->swap_slot != 0) {
+      if (spte->swap_slot != -1) {
          swap_in(spte->swap_slot, kpage);
-         spte->swap_slot=0;
+         spte->swap_slot=-1;
       }
       /* Else new page with 0's */
       else {

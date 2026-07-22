@@ -13,6 +13,7 @@
 #include "userprog/pagedir.h"
 #include "userprog/syscall.h"
 #include "userprog/tss.h"
+#include "vm/frame.h"
 #include "vm/page.h"
 #include <debug.h>
 #include <inttypes.h>
@@ -20,7 +21,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -116,7 +116,10 @@ start_process (void *file_name_)
   char *fn_copy = palloc_get_page (0);
 
   if (fn_copy == NULL)
-    thread_exit ();
+    {
+      thread_exit ();
+    }
+
   strlcpy (fn_copy, file_name, PGSIZE);
   char *prog_name = strtok_r (fn_copy, " ", &save_ptr2);
 
@@ -149,6 +152,7 @@ start_process (void *file_name_)
   if (!success)
     {
       palloc_free_page (file_name);
+      // printf("loaded was not successful");
       thread_exit ();
     }
 
@@ -346,6 +350,9 @@ process_exit (void)
           list_begin (&thread_current ()->mmap_list), struct mmap_file, elem);
       munmap (cur->mapid);
     }
+
+  free_all_proccess_frames ();
+
   hash_destroy (&cur->vm, vm_hash_spte_destroy_func);
 
   /* Close all open files  */
@@ -492,14 +499,16 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL)
-    goto done;
+    {
+      goto done;
+    }
   process_activate ();
 
   /* Open executable file. */
   file = filesys_open (file_name);
   if (file == NULL)
     {
-      printf ("load: %s: open failed\n", file_name);
+      // printf ("load: %s: open failed\n", file_name);
       goto done;
     }
 
@@ -513,7 +522,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
       || ehdr.e_machine != 3 || ehdr.e_version != 1
       || ehdr.e_phentsize != sizeof (struct Elf32_Phdr) || ehdr.e_phnum > 1024)
     {
-      printf ("load: %s: error loading executable\n", file_name);
+      // printf ("load: %s: error loading executable\n", file_name);
       goto done;
     }
 
@@ -566,6 +575,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
                   read_bytes = 0;
                   zero_bytes = ROUND_UP (page_offset + phdr.p_memsz, PGSIZE);
                 }
+
               if (!load_segment (file, file_page, (void *)mem_page, read_bytes,
                                  zero_bytes, writable))
                 goto done;
@@ -701,10 +711,12 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       spte->zero_bytes = page_zero_bytes;
       spte->in_memory = false;
       spte->swap_slot = -1;
+      spte->frame = NULL;
 
       /* Insert spte into current threads vm hash table */
-      if (!hash_insert (&thread_current ()->vm, &spte->elem))
+      if (hash_insert (&thread_current ()->vm, &spte->elem) != NULL)
         {
+
           free (spte);
           return false;
         }
@@ -727,55 +739,31 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool
 setup_stack (void **esp)
 {
-  uint8_t *kpage;
-  bool success = false;
-  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-  if (kpage != NULL)
+
+  void *v_page_addr = ((uint8_t *)PHYS_BASE) - PGSIZE;
+
+  struct supp_page_table_entry *spte = create_anon_spte (v_page_addr);
+
+  bool success = vm_page_fault_helper (spte);
+
+  // cleanup delete the created spte
+  if (!success)
     {
-      success = install_page (((uint8_t *)PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
-        {
-          *esp = PHYS_BASE;
-          /* Dynamicallly allocate memory for spte
-             so that we can free it later */
-          struct supp_page_table_entry *spte
-              = malloc (sizeof (struct supp_page_table_entry));
-          if (spte == NULL)
-            {
-              palloc_free_page (kpage);
-              return false;
-            }
-
-          /* Initialize spte fields for anon file bc stack isn't
-             backed by any file */
-          spte->type = VM_ANON;
-          spte->vaddr = ((uint8_t *)PHYS_BASE) - PGSIZE;
-          spte->writable = true;
-          spte->in_memory = true;
-          spte->file = NULL;
-          spte->offset = 0;
-          spte->read_bytes = 0;
-          spte->zero_bytes = PGSIZE;
-          spte->swap_slot = -1;
-          spte->frame = NULL;
-
-          hash_insert (&thread_current ()->vm, &spte->elem);
-        }
-      else
-        {
-          palloc_free_page (kpage);
-        }
+      hash_delete (&thread_current ()->vm, &spte->elem);
+      free (spte);
+      return -1;
     }
+
+  *esp = PHYS_BASE;
+
   return success;
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel
-   virtual address KPAGE to the page table.
-   If WRITABLE is true, the user process may modify the page;
-   otherwise, it is read-only.
-   UPAGE must not already be mapped.
-   KPAGE should probably be a page obtained from the user pool
-   with palloc_get_page().
+   virtual address KPAGE tiool install_page (void *upage, void *kpage, bool
+writable); o the page table. If WRITABLE is true, the user process may modify
+the page; otherwise, it is read-only. UPAGE must not already be mapped. KPAGE
+should probably be a page obtained from the user pool with palloc_get_page().
    Returns true on success, false if UPAGE is already mapped or
    if memory allocation fails. */
 bool

@@ -8,8 +8,8 @@
 
 >> Fill in the names and email addresses of your group members.
 
-FirstName LastName <email@domain.example>
-FirstName LastName <email@domain.example>
+Alex Xu <alexxx.xu@mail.utoronto.ca>
+Arvindh Sengu <arvindh.sengu@mail.utoronto.ca>
 FirstName LastName <email@domain.example>
 
 ---- PRELIMINARIES ----
@@ -62,6 +62,21 @@ FirstName LastName <email@domain.example>
 
 >> B2: When a frame is required but none is free, some frame must be
 >> evicted.  Describe your code for choosing a frame to evict.
+
+We implemented the simple variant of the "second chance" algorithm as described 
+in the memory management lecture notes (Second Chance implementation
+Version 1 : FIFO-like algorithm). Within swap.c we have the method get_victim_frame()
+to choose the frame to evict. Within the method we iterate through the frame table
+which is a linked list by checking the head and moving/swapping the head, then continuing
+to the next element which is the new head. If the head's accessed bit is 0, that means the bit
+was not accessed recently so we choose this frame to evict and return it. However before we choose
+the frame we make sure the frame is not pinned since we cant evict a pinned frame (e.g it is a frame with
+user resources that are used by the kernel). But, if the accessed bit is 1 (recently accessed)
+we set the bit to 0 and move it to the tail. Basically if the accessed bit is 1 we try to find a frame that 
+wasn't recently accessed (accessed bit is 0) to evict instead. Also since the frame is set to 0 and moved to the tail,
+if there is no other frame before this one with accessed bit is 0 then this frame will ultimately end up be evicted. so
+our algorithm ensures that a victim frame is chosen and performs at least as well as the simple variant of the "second chance"
+since it is the simple variant of second chance algorithm.
 
 >> B3: When a process P obtains a frame that was previously used by a
 >> process Q, how do you adjust the page table (and any other data

@@ -1,6 +1,7 @@
 #include "userprog/syscall.h"
+#include "userprog/exception.h"
 #include <stdlib.h>
-
+#include "threads/malloc.h"
 #include "devices/input.h"
 #include "devices/shutdown.h"
 #include "filesys/file.h"
@@ -32,6 +33,8 @@ static pid_t exec (const char *cmdline);
 static int wait (pid_t pid);
 mapid_t mmap (int fd, void *addr);
 void munmap (mapid_t mapid);
+static bool check_buffer_writable (const uint8_t *buffer, size_t size);
+
 
 struct lock filesys_lock;
 
@@ -112,6 +115,35 @@ check_buffer (const uint8_t *buffer, size_t size)
   return true;
 }
 
+/*checks if the pages for a buffer is writable. Returns true if all 
+pages in buffer are writable and false otherwise. Created to make 
+sure file_read does not page fault while holding the filesys lock*/
+static bool
+check_buffer_writable (const uint8_t *buffer, size_t size)
+{
+
+  const uint8_t *ptr = buffer;
+
+  if (buffer == NULL)
+    {
+      return false;
+    }
+  if (size == 0 ){
+    return true;
+  }
+
+  while (ptr < buffer + size)
+    {
+      struct supp_page_table_entry * spte = find_spte (ptr);
+      if (spte ==  NULL || spte->writable == false) 
+        return false;
+
+      ptr += PGSIZE;
+    }
+
+  return true;
+}
+
 /*sets the value of pinned of the physical page/frame related to the page at
 virtual address vaddr to pinned_value. Returns true on success and false on
 failure.*/
@@ -136,7 +168,7 @@ set_pin_page (void *vaddr, bool pinned_value)
         }
     }
 
-  spte->frame->pinned = true;
+  spte->frame->pinned = pinned_value;
 
   return true;
 }
@@ -196,7 +228,7 @@ and write system calls. Returns true on success and false on failure*/
 bool
 set_pin_buffer (const uint8_t *buffer, size_t size, bool pinned_value)
 {
-  uint8_t *cur_addr = buffer;
+  const uint8_t *cur_addr = buffer;
 
   if (size == 0)
     {
@@ -341,6 +373,8 @@ syscall_handler (struct intr_frame *f UNUSED)
         exit (-1);
       if (!check_buffer ((uint8_t *)args[1], (size_t)args[2]))
         exit (-1);
+      if (!check_buffer_writable ((uint8_t *)args[1], (size_t)args[2]))
+        exit (-1);
       if (!set_pin_buffer ((uint8_t *)args[1], (size_t)args[2], true))
         exit (-1);
       f->eax = read (args[0], (void *)args[1], (unsigned)args[2]);
@@ -386,7 +420,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
       if (!success)
         exit (-1);
-      mmap (args[0], (void *)args[1]);
+      f->eax = mmap (args[0], (void *)args[1]);
       break;
 
     case SYS_MUNMAP:
@@ -648,7 +682,13 @@ close (int fd)
 mapid_t
 mmap (int fd, void *addr)
 {
-  ASSERT (((uintptr_t)addr) % PGSIZE == 0);
+  // ASSERT (((uintptr_t)addr) % PGSIZE == 0);
+
+
+  //not 4 bit aligned
+  if (((uintptr_t)addr) % PGSIZE != 0){
+    return MAP_FAILED;
+  }
 
   struct thread *t = thread_current ();
   struct file *f;
@@ -661,19 +701,19 @@ mmap (int fd, void *addr)
   /* Validate the fd */
   if (fd == 0 || fd == 1)
     {
-      return -1;
+      return MAP_FAILED;
     }
 
   f = get_file (fd);
   if (f == NULL)
     {
-      return -1;
+      return MAP_FAILED;
     }
 
   /* Validate addr */
   if (addr == NULL || pg_ofs (addr) != 0)
     {
-      return -1;
+      return MAP_FAILED;
     }
 
   /* Acquire lock to avoid race conditions */
@@ -694,7 +734,7 @@ mmap (int fd, void *addr)
       file_close (f2);
       lock_release (&filesys_lock);
 
-      return -1;
+      return MAP_FAILED;
     }
 
   // compute how many pages file needs
@@ -703,7 +743,7 @@ mmap (int fd, void *addr)
   // check the number of consecutive sptes are free
   for (int i = 0; i < pages_needed; i++)
     {
-      void *v_page_addr = addr + i * PGSIZE;
+      void *v_page_addr = (uintptr_t)addr + i * PGSIZE;
 
       if (find_spte (v_page_addr) != NULL)
         {
@@ -712,7 +752,7 @@ mmap (int fd, void *addr)
           file_close (f2);
           lock_release (&filesys_lock);
 
-          return -1;
+          return MAP_FAILED;
         }
     }
 
@@ -724,7 +764,7 @@ mmap (int fd, void *addr)
       file_close (f2);
       lock_release (&filesys_lock);
 
-      return -1;
+      return MAP_FAILED;
     }
 
   mf->mapid = thread_current ()->next_mapid++;
@@ -738,7 +778,7 @@ mmap (int fd, void *addr)
 
   for (int i = 0; i < pages_needed; i++)
     {
-      void *v_page_addr = addr + i * PGSIZE;
+      void *v_page_addr = (uintptr_t) addr + i * PGSIZE;
       size_t read_bytes = (size - offset < PGSIZE) ? size - offset : PGSIZE;
       size_t zero_bytes = PGSIZE - read_bytes;
 

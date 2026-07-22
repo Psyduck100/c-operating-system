@@ -18,3 +18,4 @@ extern struct lock frame_table_lock;
 void frame_table_init(void);
 void *frame_allocate(struct supp_page_table_entry *spte, enum palloc_flags flags);
 void frame_free(void *k_page_addr);
+void free_all_proccess_frames (void);

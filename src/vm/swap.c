@@ -6,6 +6,7 @@
 #include <debug.h>
 #include "threads/vaddr.h"
 #include "threads/synch.h"
+#include "devices/block.h"
 
 
 static struct lock swap_lock;
@@ -70,7 +71,7 @@ swap_init () {
   if (swap_block == NULL)
     exit (1);
 
-  size_t swap_sector = block_size (swap_block);
+  block_sector_t swap_sector = block_size (swap_block);
   size_t swap_pages = swap_sector * BLOCK_SECTOR_SIZE / PGSIZE;
   
   swap_table = bitmap_create (swap_pages);
