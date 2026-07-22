@@ -417,7 +417,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       break;
 
     case SYS_MMAP:
-      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 2);
       if (!success)
         exit (-1);
       f->eax = mmap (args[0], (void *)args[1]);
@@ -827,12 +827,14 @@ munmap (mapid_t mapid)
     return;
 
   // iterate through all the spte's belonging to that mf
-  for (e = list_begin (&mf->spte_list); e != list_end (&mf->spte_list);
-       e = list_next (e))
-    {
+  e = list_begin (&mf->spte_list);
+  while (e != list_end (&mf->spte_list)){
+    
 
       struct supp_page_table_entry *cur
           = list_entry (e, struct supp_page_table_entry, mmap_elem);
+          
+       e = list_next (e);
 
       // if our spte is in memory, and page is dirty, we need to write
       if (cur->in_memory == true)
