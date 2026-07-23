@@ -52,6 +52,7 @@ get_victim_frame ()
            need to choose different page*/
           if (!cur_frame->pinned)
             {
+
               list_remove (cur_frame_elem);
               lock_release (&frame_table_lock);
 

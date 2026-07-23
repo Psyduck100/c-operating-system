@@ -10,7 +10,7 @@
 
 Alex Xu <alexxx.xu@mail.utoronto.ca>
 Arvindh Sengu <arvindh.sengu@mail.utoronto.ca>
-FirstName LastName <email@domain.example>
+Roger dai <roger.dai@mail.utoronto.ca>
 
 ---- PRELIMINARIES ----
 
@@ -30,24 +30,117 @@ FirstName LastName <email@domain.example>
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+In thread.h struct thread new struct member
+struct hash vm; /*This is a hash table that contains structs of supp_page_table_entry.
+                Stores the supplemental page table entries that each process has. (virtual page info)*/ 
+
+In page.h
+/* States the type of vm pages. Used to split between page types
+for struct supp_page_table_entry*/
+enum vm_page_type
+{
+  VM_BIN, /* A binary file. (ELF executable file)*/
+  VM_FILE,   /* Normal file. (for memory mapped files)*/
+  VM_ANON, /* Anonymous page (for swapping). */
+};
+
+In page.h
+this struct is used to store extra info for a virtual page
+struct  supp_page_table_entry {
+    bool writable; /* True if the virtual page is writable and false otherwise. Used
+                      for cases when we need to see if a virtual page can be modified*/
+    
+    bool in_memory; /*True if there is a physical mapping (in a physical
+                      frame). False otherwise. */
+     
+    void *vaddr; /* Virtual page address*/
+
+    uint32_t read_bytes; /* Number of bytes to read from file */
+
+    uint32_t zero_bytes; /* Remaining bytes at the end of a page to be filled with zeros */
+
+    off_t offset; /* Offset in the file to read from */
+    
+    struct file *file; /* File to read from for the virutal page*/
+
+    enum vm_page_type type; /* Page Type. */
+
+    struct hash_elem elem; /*hash element to store the struct entries in the 
+                             supplemental page hash tables in thread.h (struct hash vm;)*/
+
+    struct list_elem mmap_elem; /*mmap elem for the mmap list of sptes*/
+    Note: this was added later when mmap was added
+
+    struct frame *frame;/* frame for the virtual page (if there is a physical frame for the virtual apge)*/
+    Note: this was added later when struct frame was added
+
+    int swap_slot; /*the place in the swap disk that the page was swapped to*/
+    
+};
+
 ---- ALGORITHMS ----
 
 >> A2: In a few paragraphs, describe your code for accessing the data
 >> stored in the SPT about a given page.
 
+Our implementation uses a hash table keyed by the virtual address (page-aligned). 
+When a page fault occurs, the handler calls find_spte. find_spte creates a dummy entry 
+and passes it to hash_find to return the corresponding virtual address. 
+
+Each struct supp_page_table_entry holds the necessary metadata to load a page. 
+If the entry exists, vm_page_fault_helper uses the stored type and file/swap info 
+to load the data. For VM_BIN/VM_FILE, it calls load_file to read from disk. For VM_ANON
+it either fills a zero page or reads from the swap partition via swap_in.
+
 >> A3: How does your code coordinate accessed and dirty bits between
 >> kernel and user virtual addresses that alias a single frame, or
 >> alternatively how do you avoid the issue?
+We avoid this issue entirely by having accesses to a page only through
+the users virtual address passed into the syscalls. That way theres
+no mismatch. The only time the kernal writes to a frame is in the first
+load_file call and this happens before install page so theres no user PTE. 
+
+
 
 ---- SYNCHRONIZATION ----
 
 >> A4: When two user processes both need a new frame at the same time,
 >> how are races avoided?
 
+We have a global frame table struct list frame_table; and a global lock struct lock frame_table_lock.
+Our code uses and implements them so that only one proccess can do operations on the global frame table
+at a time. We make sure a process aqcuires the global frame table lock before it does any operations on the global
+frame table list. This applies to everything w.r.t frame allocation including, finding a victim frame to
+evict, freeing a frame and removing it from the global list, and adding a new frame to the global list.
+Without the global lock 2 processes needing a new frame at the same time might select the same victim frame,
+or corrupt the frame table list.
+
+So if two user processes both need a new frame at the same time, the important section which can cause errors due to race
+conditions of finding a victim page or inserting a new frame to the global frame list etc. is done one process at a time to avoid
+races.
+
+Additionally, when both processes need a new frame and swapping may happen we also have a global struct lock swap_lock; so that,
+operations on the global struct block *swap_block; and global struct bitmap *swap_table; are also done one processes at a time, to
+avoid race conditions that could cause errors (especially when dealing with global data structures). (Basically similar idea as 
+for frame table)
+
 ---- RATIONALE ----
 
 >> A5: Why did you choose the data structure(s) that you did for
 >> representing virtual-to-physical mappings?
+
+For the supp_page_table_entry we chose a hash table because of performance. 
+Every page fault must look up the SPTE entry as quickly as possible to minimize 
+delays in output. Since a hash table has O(1) lookup time, its far better than a 
+linked list. We also need to store lookup SPTE based on virtual addresses which normal 
+arrays can't do so we opted for hash tables. 
+
+we chose to represent / abstract a page worth of physical memory as a frame object.
+then an array of these formed a frame table.
+we chose to do this because the OS must track which frames are allocated, free,
+pinned, mapped to which virtual page, etc, etc. Having an frame table and abstracting
+each physical page as an object gives us a space to store all the information we need
+and makes processes such as swapping, choosing the evictee, and pinning all possible.
 
                PAGING TO AND FROM DISK
                =======================
@@ -57,6 +150,38 @@ FirstName LastName <email@domain.example>
 >> B1: Copy here the declaration of each new or changed `struct' or
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
+
+new field in page.h struct supp_page_table_entry
+struct frame *frame; /* frame for the virtual page (need to allocate when
+                        frame.h is readded)*/
+
+new field in thread.h struct thread
+
+void *user_esp; /*user stack pointer register so we can detect stack growth */
+
+
+new struct in frame.h
+/*this struct represents/is an abstraction of a page worth of phyiscal memory*/
+struct frame {
+  void *k_page_addr; //kernal address of the page/frame as pintos maps kernal to phys
+  void *v_page_addr; //virtual address
+  struct thread * owning_thread; //thread that owns this page
+  struct supp_page_table_entry *spte; /*the spte that links to this frame*/
+  struct list_elem frame_elem; /*the list elem*/
+  bool pinned; /*whether or not this frame is pinned so we don't evict it if so*/
+};
+
+In page.h for struct supp_page_table_entry 
+struct frame *frame;/* frame for the virtual page (if there is a physical frame for the virtual apge)*/
+int swap_slot; /*the place in the swap disk that the page was swapped to*/
+
+new global variables
+extern struct list frame_table; /*global frame table, list of all frame objects*/
+extern struct lock frame_table_lock; /*lock for the shared frame table resource*/
+
+static struct lock swap_lock; // lock for all swapping operations 
+static struct block *swap_block; // global pointer to the swap block device
+static struct bitmap *swap_table; // bitmap to track which slots on the swap block are in use
 
 ---- ALGORITHMS ----
 
@@ -82,9 +207,42 @@ since it is the simple variant of second chance algorithm.
 >> process Q, how do you adjust the page table (and any other data
 >> structures) to reflect the frame Q no longer has?
 
+To reflect the frame that Q no longer has we first set the supplemental page table entry values.
+Each frame has a struct supp_page_table_entry *spte; to access the spte mapping to the frame. 
+To reflect that Q no longer has the frame we first make sure the f->spte->in_memory = false since Q does not have a
+physical frame anymore and the page is not in physical memory. We also set f->spte->frame = NULL. spte->frame is the frame
+mapping that a spte has, but since Q no longer has a frame we set it to null. For the page table we also call 
+pagedir_clear_page (f->owning_thread->pagedir, f->spte->vaddr) to get rid of the mapping in the page table between 
+virtual memory Q and the physical frame mapping that Q no longer has. f->owning_thread->pagedir is the page dir
+related to the frame and f->spte->vaddr is the user virtual page that we need to get rid of in the mapping. 
+For a special case as well, when Q no longer has a frame because it was swapped out/evicted, if f->spte->type == VM_BIN
+(a binary/ executable type file) and the page is dirty we also need to switch f->spte->type = VM_ANON for Q.
+This is because if we want this page again when page fault/demand paging happens we want to get the dirty/changed page 
+from the swap parition rather than the old one from the VIM_BIN type file in the disk. Also in general is the frame was 
+swapped out we set f->spte->swap_slot to the actual swap slot it was swapped to so we can get back our page when 
+it page faults again later.
+
+When Q no longer has a frame we also make sure to free the frame with our frame_free() function. For our global frame table
+with struct frames, when q no longer has a frame we make sure to remove the frame from the global frame table and free the 
+frame struct f related to this frame by doing free(f).
+We also call palloc_free_page (f->k_page_addr); f->k_page_addr would be saved before we free the struct. We call this function
+to free the actual physical page from Q so that our vm system knows this phyiscal page is free to be used
+by a new process (in this case process P). (Our frame allocation fucntion will also take care of things when process p obtains the
+frame)
+
+
 >> B4: Explain your heuristic for deciding whether a page fault for an
 >> invalid virtual address should cause the stack to be extended into
 >> the page that faulted.
+
+for a stack growth case in the page fault, the following conditions must be met.
+1. the faulting address must not belong to another spte. As we want
+to only extend the stack when the page fault occurs on unmapped virtual
+adresses
+2. the faulting address must be within 32 bytes of the stack pointer. This is to 
+detect a valid instance of the stack growing rather than actual wrongful access
+3. the newly extended stack must not exceed 8MB
+
 
 ---- SYNCHRONIZATION ----
 
@@ -93,21 +251,123 @@ since it is the simple variant of second chance algorithm.
 >> textbook for an explanation of the necessary conditions for
 >> deadlock.)
 
+from text book
+Four conditions need to hold for a deadlock to occur [C+71]:
+• Mutual exclusion: Threads claim exclusive control of resources that
+they require (e.g., a thread grabs a lock).
+• Hold-and-wait: Threads hold resources allocated to them (e.g., locks
+that they have already acquired) while waiting for additional resources (e.g., locks that they wish to acquire).
+• No preemption: Resources (e.g., locks) cannot be forcibly removed
+from threads that are holding them.
+• Circular wait: There exists a circular chain of threads such that each
+thread holds one or more resources (e.g., locks) that are being requested by the next thread in the chain.
+
+If any of these four conditions are not met, deadlock cannot occur.
+Thus, we first explore techniques to prevent deadlock; each of these strategies 
+seeks to prevent one of the above conditions from arising and thus is
+one approach to handling the deadlock problem.
+
+Our vm synchornization design includes our global frame table with out global frame table lock,
+our global swap block and bitmap with our global swap block and bitmap lock, our file system lock.
+
+All these global locks are created so that when any process wants to touch the global frame table,
+swap block, swap bitmap, or file system, they must acquire the respective locks first. This makes
+sure that only one process can access the global resource at a time. Our design prevents deadlocks
+by preventing hold-and-wait. Whenever we acquire locks we only try to hold it for the shortest amount of
+time necessary and release it so that threads/processes wont be watiing for another lock while
+holding a lock. An example of this is in our frame_function we acquire the frame lock to find our victim frame,
+then release it then acquire the filesys lock in one of the cases for file_write_at then release the file sys lock
+then reacquire the frame lock to add a new frame. In this example we never hold and wait and we do this thoughout
+our project.
+
+Another important part of our synchronization design is pinning. We use pinning so that any pinned
+frame cannot be evicted. We use this to stop deadlocks by stopping hold-and-wait. 
+One example is we pin frames of user resources that the kernel needs to use so that a page fault wont occur 
+and cause a deadlock. We mainly implement this for the read and write system calls.
+For both read and write syscalls we need to pin all frames inside the buffer. For example if we call read 
+syscall we will need to acquire the filesys lock and call file_read. But if the buffer is evicted because
+it isn't pinned our vm system will page fault to bring back the buffer pages. But to do that the page fault 
+will try to acquire the filesys lock again and cause a deadlock. That is why we pin user resources used such 
+as buffer for read and write syscalls and unpin them oncethe syscall is done. With pinning the same process 
+won't try to acquire the same lock its holding so we prevent hold-and-wait.
+
+We also just consider synchronization and deadlocks in general. One example of this is for the read syscall.
+Once case where a deadlock can happen is if the pages of our buffer that we write to for the read syscall is not writable.
+To call the read syscall we need to call file_read so we acquire the file lock, but if our buffer is not writable
+and we try to write to the buffer from our read syscall we will have a page fault. The page fault will then try to
+terminate the process, but when terminating the process the file lock will once again try to be acquired.
+But since the process already holds the file lock we would reach another deadlock. To prevent this hold and wait case we 
+made sure to check that the buffer for read is writable before we even call the syscall.
+
+
 >> B6: A page fault in process P can cause another process Q's frame
 >> to be evicted.  How do you ensure that Q cannot access or modify
 >> the page during the eviction process?  How do you avoid a race
 >> between P evicting Q's frame and Q faulting the page back in?
+
+To ensure that Q does not access the page during process P, we destroy the mapping that 
+Q holds to the physical frame. We also set the evicting frame's in_memory value to true and pin the frame.
+Then when Q tries to access the same address, it will trigger a fault. To prevent Q from accessing the frame in
+this fault, we must block Q untill P's fault has finished. In our vm_page_fault_helper
+function which actually faults the page back in it first checks if the frame's in_memory is true
+and if it is. The vm_page_fault_helper does nothing. And since we set in_memory to true for our evicting
+page Q will not be able to fault the page back in
+Then it is safe to unblock Q. Also because we pin the evicting frame no other frame can evict it including Q.
+During eviction we also hold the frame table lock so that no other process including Q can change the frame table.
+
 
 >> B7: Suppose a page fault in process P causes a page to be read from
 >> the file system or swap.  How do you ensure that a second process Q
 >> cannot interfere by e.g. attempting to evict the frame while it is
 >> still being read in?
 
+We ensure that a second process Q cannot interfere by pinning the frame 
+that is being read into from the file system or swap. In our page-fault/vm_page_fault_helper 
+right after we call our frame_allocate function and set the frame we pin the frame. Then only
+after page_fault and vm_page_fault_helper finishes what it needs to i.e reading from file system
+or swap we unpin the frame. Our get_victim_frame function never chooses a pinned frame
+as a frame to evict which means that a second procces Q cannot interfere with our process P
+which is reading from a file system or swap.
+
 >> B8: Explain how you handle access to paged-out pages that occur
 >> during system calls.  Do you use page faults to bring in pages (as
 >> in user programs), or do you have a mechanism for "locking" frames
 >> into physical memory, or do you use some other design?  How do you
 >> gracefully handle attempted accesses to invalid virtual addresses?
+
+Our paged-out pages that occur during system calls are handled with page_fault and
+our vm_page_fault_helper with demand-paging, along with a pinning mechanism. If we try to access a 
+paged-out page in our system call, we first check for a valid virtual address. We already checked invalid
+virtual addresses in project 3 with page_fault with checking if (!user && fault_addr < PHYS_BASE).
+However this is not enough for syscall virtual address checks when virtual address does not have a physical
+mapping (not_present == true). In project 3 however we may have a virtual address that does not 
+have a physical mapping (not_present == true). To check the validity of this virtual address we use our
+helper fucntion find_spte (fault_addr); to see if the address is a valid virtual address by seeing if
+we can find it in the supplemental page table. If its in the table then it is a valid address that 
+we can get from demand paging (even if we have to swap back out). And if it doesnt exist in the spt,
+and isn't valid to grow the stack then the address would be invalid and we would terminate the process
+as the address is invalid.
+
+Once the address is confirmed to be valid we use our vm_page_fault_helper function to do demand paging
+based on the type of page of virtual address was reffering to and allocate a physical frame for the
+virtual address. If the page is of type VM_BIN or VM_FILE we load the respective file and if it is VM_ANON
+we swap back in the page.
+
+We also have a pinning mechanism to "lock" frames into memory. Our pinning mechanism is designed so that any pinned
+frame cannot be evicted. As explained in B7 we use our pinning system to ensure another processes cannot attempt to 
+evict a frame while it is being read in. Additionally, we also pin frames of user resources that the kernel needs 
+to use so that a page fault wont occur and cause a deadlock. We mainly implement this for the read and write system 
+calls. We cant let pages with user resouces be evicted while a system call is using them or else we will run into a 
+deadlock. For both read and write syscalls we need to pin all pages inside the buffer. For example if we call read 
+syscall we will need to acquire the filesys lock and call file_read. But if the buffer is evicted our vm system will 
+page fault to bring back the buffer pages. But the page fault will try to acquire the filesys lock again and cause a 
+deadlock. That is why we pin user resources used such as buffer for read and write syscalls and unpin them once
+the syscall is done. (Note: same explanation as B5)
+
+As explained above we gracefully handle attempted access to invalid virtual addresses by seeing if it exists in the spt,
+if it doesnt we try to grow the stack. But if all fail we will terminate the process.
+
+
 
 ---- RATIONALE ----
 
@@ -118,6 +378,30 @@ since it is the simple variant of second chance algorithm.
 >> where your design falls along this continuum and why you chose to
 >> design it this way.
 
+Our implementation uses three locks: frame_table_lock (for the physical
+frame list), swap_lock (for the swap bitmap) and filesys_lock (for file 
+operations). This places us in the middle of the continuum as we avoid 
+using only a single global lock while also not using many locks. 
+
+Using a single global VM lock would limit the system to one memory operation 
+at a time. Although it could avoid all deadlocks, it would cripple the 
+runtime and system performance if multiple threads are trying to access files.
+
+On the other hand, using many locks could maximize parallelism but would be
+enormously complex. Acquring multiple locks in the correct order, avoiding 
+deadlocks when evicting a chain of dependent pages would require a very 
+intricate algorithm that would be unreasonably complicated to implement 
+with very little benefits in the scope of this course. 
+
+Our middle-continuum design avoids deadlocks while keeping the locking order 
+simple and understandable. The frame_table_lock and swap_lock are only 
+acquired during page allocation/eviction and swap in/out. The filesys_lock is 
+only acquired for disk I/O operations only. 
+
+We chose this design because it achieves the primary goal of no deadlocks and 
+no race conditions without sacrificing the parallelism that is required for the 
+tests. 
+
              MEMORY MAPPED FILES
              ===================
 
@@ -127,14 +411,77 @@ since it is the simple variant of second chance algorithm.
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+
+in thread.h, new fields in struct thread
+  struct list mmap_list; /*list of memory mapped files*/ 
+  mapid_t next_mapid; /*next available mapid for memory mapped files, this increments so
+                        we always have a unique mapid*/
+
+in page.h new struct
+
+/*this struct is for tracking each file to memory mapping*/
+struct mmap_file
+{
+  mapid_t mapid;         /* The mapping id */
+  struct file *file;     /* The file being mapped */
+  struct list spte_list; /* List of supplemental page table entries for this
+                            mapping */
+  struct list_elem
+      elem; /* List element for the list of memory-mapped files */
+};
+
+page.h new field in struct supp_page_table_entry
+  struct list_elem mmap_elem; /*mmap elem for the mmap list of sptes*/
+
+
 ---- ALGORITHMS ----
 
 >> C2: Describe how memory mapped files integrate into your virtual
 >> memory subsystem.  Explain how the page fault and eviction
 >> processes differ between swap pages and other pages.
 
+each mmap file is represented by an struct mmap_file object. this object
+contains a list of every supp_page_table_entry that file mapping spans.
+furthermore each process tracks its mappings in its thread object, a list
+field mmap_list.
+
+when mmap() is called it validates the request, then computes how many
+virtual pages (spte) are needed. Then it sets those tables objects up 
+as VM_FILE and calculates read_bytes, zero_bytes, and sets up the rest of 
+the fields accordingly.
+
+then when it page faults, it hits the VM_FILE path and gets loaded in via
+the page fault handler. 
+
+for unmappping, we iterate through the mmap_file object that corresponds to 
+the mapping. during the iteration we write the page back to file / disk location
+its recorded at, then clear the page table etnry and free the frame. The spte's are
+all removed from the processes page table and freed. This also happens during 
+process_exit.
+
+the page fault and eviction process differ between swap pages and other pages.
+For swap pages, (type VM_ANON), it has no home in the disk, when it is evicted,
+its data must be written to somewhere or else it is lost. We create an list of
+swap slots. Each slot represents where the data is written upon eviction to and
+each spte carries a swap slot field. 
+
+for the other pages, they all have backing / copies of themselves so the
+eviction process is different. FOr VM_BIN, since it always has a copy,
+eviction just discards it and doesn't save anything. However, if written,
+to it must not override the original file, so it is saved to a swap slot, 
+similiar to the VM_ANON case.
+
+For VM_FILE, it is meant to be written too, so munmap and eviction
+will write back the changed files contents directly to its physical
+location. 
+
+
 >> C3: Explain how you determine whether a new file mapping overlaps
 >> any existing segment.
+
+Overlap checking is done directly in the mmap() function. we loop over all
+the spte's that the file would need and make sure they are all free before
+allocating annything. If not, we return -1. 
 
 ---- RATIONALE ----
 
@@ -144,6 +491,19 @@ since it is the simple variant of second chance algorithm.
 >> that much of their implementation can be shared.  Explain why your
 >> implementation either does or does not share much of the code for
 >> the two situations.
+
+Our implementation shares the loading follow between VM_BIN and VM_FILE
+exactly in the page fault helper. This is because the two are identical 
+in the process of bringing the page into the physical memorr, both are 
+file backed, have a source file, a byte offset. All we need to do Is
+track the correct read_bytes and zero_bytes. 
+
+The two differ in the write back or eviction site. When the VM_BIN is 
+evicted it needs to be written to a swap slot if edited else, discarded.
+VM_FILE however will get written back to its originall mapped file if it
+has been modified.
+
+
 
                SURVEY QUESTIONS
                ================

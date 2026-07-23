@@ -10,6 +10,7 @@
 struct list frame_table;
 struct lock frame_table_lock;
 
+/*initialize global frame table and lock*/
 void
 frame_table_init (void)
 {
@@ -17,6 +18,10 @@ frame_table_init (void)
   lock_init (&frame_table_lock);
 }
 
+
+/*allocates a physical frame for struct supp_page_table_entry *spte based on 
+enum palloc_flags flags. When allocating if there is no free frame this function
+will evict and swap out a victim frame to make space for a frame for spte*/
 void *
 frame_allocate (struct supp_page_table_entry *spte, enum palloc_flags flags)
 {
@@ -27,6 +32,9 @@ frame_allocate (struct supp_page_table_entry *spte, enum palloc_flags flags)
   if (k_page_addr == NULL)
     {
       struct frame *victim = get_victim_frame ();
+
+      /*pin victim page so no other page can swap it out*/
+      victim->pinned = true;
 
       enum vm_page_type type = victim->spte->type;
       int swap_slot = -1;
@@ -51,9 +59,11 @@ frame_allocate (struct supp_page_table_entry *spte, enum palloc_flags flags)
 
           if (is_dirty)
             {
+              lock_acquire (&filesys_lock);
+
               file_write_at (victim->spte->file, victim->k_page_addr,
                              victim->spte->read_bytes, victim->spte->offset);
-              ;
+              lock_release (&filesys_lock);
             }
         }
 
@@ -79,6 +89,10 @@ frame_allocate (struct supp_page_table_entry *spte, enum palloc_flags flags)
       /*free the frame's physical page and its tracking struct directly
     (the frame was already removed from the frame table by get_victim_frame) */
       palloc_free_page (victim->k_page_addr);
+
+      //unpin victim page
+      victim->pinned = false;
+
       free (victim);
 
       /*re get a page after we evicted one*/
@@ -92,14 +106,17 @@ frame_allocate (struct supp_page_table_entry *spte, enum palloc_flags flags)
 
       return NULL;
     }
-
+  
+  /*set variables for new frame*/
   f->k_page_addr = k_page_addr;
   f->v_page_addr = spte->vaddr;
   f->spte = spte;
   f->owning_thread = thread_current ();
   f->pinned = false;
   f->spte->frame = f;
-
+  f->spte->in_memory = true;
+  
+  /*add to global frame table*/
   lock_acquire (&frame_table_lock);
   list_push_back (&frame_table, &f->frame_elem);
   lock_release (&frame_table_lock);
@@ -116,6 +133,7 @@ frame_free (void *k_page_addr)
 
   struct list_elem *cur;
 
+  /*loop through global frame list*/
   for (cur = list_begin (&frame_table); cur != list_end (&frame_table);
        cur = list_next (cur))
     {
@@ -123,6 +141,7 @@ frame_free (void *k_page_addr)
       if (f->k_page_addr == k_page_addr)
         {
 
+          /*free/set things related to this frames spte if it has one*/
           if (f->spte != NULL)
             {
               f->spte->frame = NULL;
@@ -140,6 +159,8 @@ frame_free (void *k_page_addr)
   palloc_free_page (k_page_addr);
 }
 
+
+/*Frees all frames for the current process*/
 void
 free_all_proccess_frames ()
 {
@@ -147,6 +168,7 @@ free_all_proccess_frames ()
 
   struct list_elem *cur = list_begin (&frame_table);
 
+  /*iterate through the frame table*/
   while (cur != list_end (&frame_table))
     {
       struct frame *f = list_entry (cur, struct frame, frame_elem);
@@ -155,6 +177,7 @@ free_all_proccess_frames ()
       if (f->owning_thread == thread_current ())
         {
 
+          /*free the frame*/
           f->spte->frame = NULL;
           f->spte->in_memory = false;
           if (f->spte != NULL)

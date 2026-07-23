@@ -122,8 +122,8 @@ kill (struct intr_frame *f)
     }
 }
 
-// returns true if the fault addr is a result of stack overflow and meets valid
-// cond for stack growth
+/*returns true if the fault addr is a result of stack overflow and meets valid
+cond for stack growth*/
 static bool
 valid_stack_growth (void *fault_addr, void *esp)
 {
@@ -163,6 +163,13 @@ vm_page_fault_helper (struct supp_page_table_entry *spte)
           return false;
         }
 
+      /*pin the frame so that another process can't evict the frame we are
+      still loading in*/
+      if (spte->frame != NULL)
+        {
+          spte->frame->pinned = true;
+        }
+
       bool success = load_file (spte, kpage);
 
       if (!success)
@@ -185,6 +192,12 @@ vm_page_fault_helper (struct supp_page_table_entry *spte)
 
       spte->in_memory = true;
 
+      /*unpin the frame after it is done loading and installed*/
+      if (spte->frame != NULL)
+        {
+          spte->frame->pinned = false;
+        }
+
       return true;
     }
 
@@ -192,8 +205,16 @@ vm_page_fault_helper (struct supp_page_table_entry *spte)
   if (spte->type == VM_ANON)
     {
       void *kpage = frame_allocate (spte, PAL_USER | PAL_ZERO);
+
       if (kpage == NULL)
         return false;
+
+      /*pin the frame so that another process can't evict the frame we are
+      still loading in*/
+      if (spte->frame != NULL)
+        {
+          spte->frame->pinned = true;
+        }
 
       /* If page was swapped out */
       if (spte->swap_slot != -1)
@@ -216,6 +237,12 @@ vm_page_fault_helper (struct supp_page_table_entry *spte)
         }
 
       spte->in_memory = true;
+
+      /*unpin the frame after it is done loading and installed*/
+      if (spte->frame != NULL)
+        {
+          spte->frame->pinned = false;
+        }
 
       return true;
     }

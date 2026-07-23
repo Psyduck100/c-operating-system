@@ -177,56 +177,6 @@ set_pin_page (const void *vaddr, bool pinned_value)
   return true;
 }
 
-// /*sets pinned to pinned_value for all pages for a string such as filename or
-// cmdline for system calls. Returns true on success and false on failure*/
-// bool
-// set_pin_string (const char *str, bool pinned_value)
-// {
-//   char *cur_addr = str;
-//   char *start_of_pg = pg_round_down (str);
-//   char *end_of_pg = start_of_pg + PGSIZE;
-
-//   bool next_page = true;
-
-//   /*pin the current page with the helper then continue to pin next page if
-//   the string continues to the next page*/ while (next_page == true)
-//     {
-//       bool success = set_pin_page (cur_addr, pinned_value);
-//       if (!success)
-//         return false;
-
-//       /*figure out if the string flows to the next page*/
-//       while (cur_addr < end_of_pg)
-//         {
-
-//           /*need to use get_user as string is in user vm*/
-//           int byte_value = get_user (cur_addr);
-
-//           /*checks if get_user had a segfault*/
-//           if (byte_value == -1)
-//             {
-//               return false;
-//             }
-
-//           /*string ends on this page*/
-//           if (byte_value == '\0')
-//             {
-//               /*will exit loop after this iteration*/
-//               next_page = false;
-//               break;
-//             }
-
-//           cur_addr++;
-//         }
-
-//       cur_addr = pg_round_down (end_of_pg + 1);
-//       start_of_pg = cur_addr;
-//       end_of_pg = start_of_pg + PGSIZE;
-//     }
-
-//   return true;
-// }
-
 /*sets pinned argument to pinned_value for all pages for the buffer for read
 and write system calls. Returns true on success and false on failure*/
 static bool

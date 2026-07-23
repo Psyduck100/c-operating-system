@@ -53,11 +53,6 @@ vm_hash_spte_destroy_func (struct hash_elem *e, void *aux)
       swap_free (spte->swap_slot);
     }
 
-  /*free frame if there is one*/
-  /*if (spte->frame != NULL){
-      frame_free (spte->frame->k_page_addr);
-  }*/
-
   free (spte);
 }
 
