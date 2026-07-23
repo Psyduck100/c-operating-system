@@ -1,5 +1,5 @@
-#include "filesys/file.h"
 #include "frame.h"
+#include "filesys/file.h"
 #include "swap.h"
 #include "threads/malloc.h"
 #include "threads/palloc.h"
@@ -18,10 +18,10 @@ frame_table_init (void)
   lock_init (&frame_table_lock);
 }
 
-
-/*allocates a physical frame for struct supp_page_table_entry *spte based on 
-enum palloc_flags flags. When allocating if there is no free frame this function
-will evict and swap out a victim frame to make space for a frame for spte*/
+/*allocates a physical frame for struct supp_page_table_entry *spte based on
+enum palloc_flags flags. When allocating if there is no free frame this
+function will evict and swap out a victim frame to make space for a frame for
+spte*/
 void *
 frame_allocate (struct supp_page_table_entry *spte, enum palloc_flags flags)
 {
@@ -90,7 +90,7 @@ frame_allocate (struct supp_page_table_entry *spte, enum palloc_flags flags)
     (the frame was already removed from the frame table by get_victim_frame) */
       palloc_free_page (victim->k_page_addr);
 
-      //unpin victim page
+      // unpin victim page
       victim->pinned = false;
 
       free (victim);
@@ -106,7 +106,7 @@ frame_allocate (struct supp_page_table_entry *spte, enum palloc_flags flags)
 
       return NULL;
     }
-  
+
   /*set variables for new frame*/
   f->k_page_addr = k_page_addr;
   f->v_page_addr = spte->vaddr;
@@ -115,7 +115,7 @@ frame_allocate (struct supp_page_table_entry *spte, enum palloc_flags flags)
   f->pinned = false;
   f->spte->frame = f;
   f->spte->in_memory = true;
-  
+
   /*add to global frame table*/
   lock_acquire (&frame_table_lock);
   list_push_back (&frame_table, &f->frame_elem);
@@ -158,7 +158,6 @@ frame_free (void *k_page_addr)
   lock_release (&frame_table_lock);
   palloc_free_page (k_page_addr);
 }
-
 
 /*Frees all frames for the current process*/
 void

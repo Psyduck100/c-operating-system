@@ -6,13 +6,13 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "vm/page.h"
 #include <debug.h>
+#include <hash.h>
 #include <random.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
-#include "vm/page.h"
-#include <hash.h>
 
 #ifdef USERPROG
 #include "threads/palloc.h"

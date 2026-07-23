@@ -1,10 +1,10 @@
+#include "vm/swap.h"
 #include "devices/block.h"
 #include "frame.h"
 #include "lib/kernel/bitmap.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
-#include "vm/swap.h"
 #include <debug.h>
 
 static struct lock swap_lock;

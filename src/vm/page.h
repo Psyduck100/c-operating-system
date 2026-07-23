@@ -43,7 +43,6 @@ struct supp_page_table_entry
   int swap_slot; /*the place in the swap disk that the page was swapped to*/
 };
 
-
 /*this struct is for tracking each file to memory mapping*/
 struct mmap_file
 {
@@ -51,10 +50,8 @@ struct mmap_file
   struct file *file;     /* The file being mapped */
   struct list spte_list; /* List of supplemental page table entries for this
                             mapping */
-  struct list_elem
-      elem; /* List element for the list of memory-mapped files */
+  struct list_elem elem; /* List element for the list of memory-mapped files */
 };
-
 
 unsigned vm_hash_spte (const struct hash_elem *e, void *aux);
 bool vm_hash_spte_less_func (const struct hash_elem *a,
