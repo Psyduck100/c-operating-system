@@ -143,10 +143,10 @@ filesys_create (const char *name, off_t initial_size, int file_or_dir)
   return success;
 }
 
-/* Opens the file or dir with the given NAME.
-   Returns the new file or dir if successful or
+/* Opens the file with the given NAME.
+   Returns the new file if successful or
    a null pointer otherwise.
-   Fails if no file or dir named NAME exists,
+   Fails if no file named NAME exists,
    or if an internal memory allocation fails. */
 struct file *
 filesys_open (const char *name)
