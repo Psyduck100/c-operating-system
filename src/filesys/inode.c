@@ -745,12 +745,15 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
   if (inode->deny_write_cnt)
     return 0;
 
-  
+  bool to_extend = false;
+  off_t alloc_length = 0;
+
   /* Want to extend file size if necessary*/
   if (offset + size > inode_length(inode)) {
 
     /* Acquire lock to avoid race conditions */
     lock_acquire(&inode->inode_lock);
+    to_extend = true;
 
     
     off_t new_length = offset + size;
@@ -768,13 +771,12 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
 
     }
 
-    /*write back to disk as byte to sector modified on_disk_inode*/
-    inode->data.length = (i == new_blocks) ? new_length : i * BLOCK_SECTOR_SIZE;
-    block_write(fs_device, inode->sector, &inode->data);
-    lock_release(&inode->inode_lock);
+    /*how much was allocated*/
+    alloc_length = (i == new_blocks) ? new_length : i * BLOCK_SECTOR_SIZE;
 
   }
 
+  off_t actual_length = to_extend ? alloc_length : inode_length(inode);
   while (size > 0) 
     {
       /* Sector to write, starting byte offset within sector. */
@@ -782,7 +784,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
       int sector_ofs = offset % BLOCK_SECTOR_SIZE;
 
       /* Bytes left in inode, bytes left in sector, lesser of the two. */
-      off_t inode_left = inode_length (inode) - offset;
+      off_t inode_left = actual_length - offset;
       int sector_left = BLOCK_SECTOR_SIZE - sector_ofs;
       int min_left = inode_left < sector_left ? inode_left : sector_left;
 
@@ -823,6 +825,14 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
       bytes_written += chunk_size;
     }
   free (bounce);
+
+  if (to_extend) {
+    off_t final_length = offset > inode_length(inode) ? offset : inode_length(inode);
+    inode->data.length = final_length;
+    block_write(fs_device, inode->sector, &inode->data);
+    lock_release(&inode->inode_lock);
+
+  }
 
   return bytes_written;
 }
