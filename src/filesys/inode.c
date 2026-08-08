@@ -11,7 +11,7 @@
 
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
-#define NUM_DIRECT 124
+#define NUM_DIRECT 123
 #define PTRS_PER_SECTOR 128
 #define NOT_ALLOCATED ((block_sector_t) -1)
 typedef uint32_t block_sector_t;
@@ -20,6 +20,8 @@ typedef uint32_t block_sector_t;
    Must be exactly BLOCK_SECTOR_SIZE bytes long. */
 struct inode_disk
   {
+    int file_or_dir;                     /*int that represents if the disk is storing an 
+                                          file or a directory 0 for file 1 for directory*/
     off_t length;                       /* File size in bytes. */
     unsigned magic;                     /* Magic number. */
     block_sector_t direct[NUM_DIRECT];  /* direct pointer to disk data sectors */
@@ -44,7 +46,6 @@ struct inode
     bool removed;                       /* True if deleted, false otherwise. */
     int deny_write_cnt;                 /* 0: writes ok, >0: deny writes. */
     struct inode_disk data;             /* Inode content. */
-    struct lock inode_lock;            /* Lock for extending the inode. */
   };
 
   struct indirect_block
@@ -244,11 +245,12 @@ inode_init (void)
 
 /* Initializes an inode with LENGTH bytes of data and
    writes the new inode to sector SECTOR on the file system
-   device.
+   device. sets the disk_inode file_or_dir to int file_or_dir
+   to represent if created indoe is a file or dir
    Returns true if successful.
    Returns false if memory or disk allocation fails. */
 bool
-inode_create (block_sector_t sector, off_t length)
+inode_create (block_sector_t sector, off_t length, int file_or_dir)
 {
   struct inode_disk *disk_inode = NULL;
   bool success = false;
@@ -265,6 +267,7 @@ inode_create (block_sector_t sector, off_t length)
       size_t sectors = bytes_to_sectors (length);
       disk_inode->length = length;
       disk_inode->magic = INODE_MAGIC;
+      disk_inode->file_or_dir = file_or_dir;
 
       if (sectors > 0) 
         {

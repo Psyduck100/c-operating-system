@@ -72,6 +72,7 @@ process_execute (const char *file_name)
     }
 
   struct thread *cur_t = thread_current ();
+
   struct thread *found_child = NULL;
   struct list_elem *cur_child;
 
@@ -86,6 +87,23 @@ process_execute (const char *file_name)
       if (child_t->tid == tid)
         {
           found_child = child_t;
+
+          if (found_child->parent != NULL)
+            {
+              /*set directory of new process to same as directory of parent
+              but we must reopen the directory because we want the
+              directories to be seperate so changing either directory
+              has no effect on the other*/
+              if (found_child->parent->cur_dir != NULL){
+                found_child->cur_dir = dir_reopen (found_child->parent->cur_dir);
+              }
+              /*if parent has no directory set to root directory*/
+              else{
+                found_child->cur_dir = dir_open_root ();
+              }
+              
+            }
+
           sema_down (&found_child->load_sema);
           break;
         }
@@ -291,10 +309,8 @@ process_exit (void)
       struct list_elem *e = list_pop_front (&cur->child_list);
       struct thread *child = list_entry (e, struct thread, child_elem);
 
-
       /* Allow the child to pass its die_sema down (if it already hasn't). */
       sema_up (&child->die_sema); // unblocks child from dying
-
 
       /* Wait for the child to enter process_exit and up its wait_sema. */
       sema_down (&child->wait_sema);
@@ -341,10 +357,9 @@ process_exit (void)
     }
 
   /* Notify parent and wait for permission to die */
-  sema_up (&cur->wait_sema); //increments value to 1
+  sema_up (&cur->wait_sema); // increments value to 1
 
-
-  sema_down (&cur->die_sema); //blocks itself from dying
+  sema_down (&cur->die_sema); // blocks itself from dying
 }
 /* Sets up the CPU for running user code in the current
    thread.
