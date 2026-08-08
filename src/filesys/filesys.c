@@ -189,16 +189,40 @@ filesys_remove (const char *name)
   /* if its a directory u can only remove if its empty
   so we check if its empty. If its not empty we return false
   and don't remove it*/
-  if (inode->data->file_or_disk == 1)
+  if (inode->data->file_or_dir == 1)
     {
 
-      
+      /*open the directory*/
+      struct dir *cur_dir = dir_open (inode);
 
+      char name[NAME_MAX + 1];
+
+          /*read all directory entires in cur_dir and store the
+          current entires name in name*/
+          while (dir_readdir (cur_dir, name) != false)
+      {
+
+        /*if the directory has an entry that isn't the special
+        . or .. directory entry then the directory isn't empty
+        and we cant remove and return false*/
+        if (strcmp (name, ".") != 0 && strcmp (name, "..") != 0)
+          {
+            dir_close (cur_dir);
+            inode_close (inode);
+            dir_close (dir);
+            return false;
+          }
+      }
+      dir_close (cur_dir);
     }
+
+  /*if the above while loop passes without returning false
+  then the directory is empty and we can remove the input*/
 
   /*we only need to check if its a directory since if its a file
   we can just remove it*/
   bool success = dir_remove (dir, entry_name);
+  inode_close (inode);
   dir_close (dir);
 
   return success;
