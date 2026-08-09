@@ -126,7 +126,6 @@ traverse_path (const char *name, struct dir **directory)
         }
 
       token = next_token;
-
     }
 
   *directory = cur_dir;
@@ -183,6 +182,15 @@ filesys_create (const char *name, off_t initial_size)
   block_sector_t inode_sector = 0;
   struct dir *dir;
 
+  /*check if the current directory is "removed" and if it is
+  then attempts to create newfiles  
+  in a deleted directory must be disallowed so return null.
+  (first need to make sure its not an absolute path)*/
+  /*if (name[0] != '/' && thread_current ()->cur_dir->inode->removed == true)
+    {
+      return false;
+    }*/
+
   char *entry_name = traverse_path (name, &dir);
 
   bool success = (dir != NULL && free_map_allocate (1, &inode_sector)
@@ -222,6 +230,15 @@ filesys_open (const char *name)
         }
       return file_open (inode);
     }
+
+  /*check if the current directory is "removed" and if it is
+  then attempts to open files (including . and ..)
+  in a deleted directory must be disallowed so return null.
+  (first need to make sure its not an absolute path)*/
+  /*if (name[0] != '/' && thread_current ()->cur_dir->inode->removed == true)
+    {
+      return NULL;
+    }*/
 
   char *entry_name = traverse_path (name, &dir);
 
