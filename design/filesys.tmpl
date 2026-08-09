@@ -9,7 +9,7 @@
 >> Fill in the names and email addresses of your group members.
 
 Arvindh Sengu arvindh.sengu@mail.utoronto.ca
-FirstName LastName <email@domain.example>
+Alex Xu <alexxx.xu@mail.utoronto.ca>
 FirstName LastName <email@domain.example>
 
 ---- PRELIMINARIES ----
@@ -30,6 +30,7 @@ FirstName LastName <email@domain.example>
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+In inode.h we have additional members for inode_disk
 struct inode_disk 
     block_sector_t direct[NUM_DIRECT];  /* direct pointer to disk data sectors */
     block_sector_t indirect;            /* indirect sector containing direct data sectors*/
@@ -54,19 +55,19 @@ Total of 512 bytes for each inode.
 
 Each indirect block is one full sector, so it has 512 / 4 = 128 block ptrs 
 
-So we have 124 direct blocks,
+So we have 123 direct blocks,
 128 indirect blocks,
 128 x 128 = 16384 double indirect blocks
 
-Total of 124 + 128 + 16384 = 16636 addressable blocks
+Total of 123 + 128 + 16384 = 16635 addressable blocks
 
 BLOCK_SECTOR_SIZE = 512 bytes/block 
 
-So, 16636 * 512 = 8517362 bytes 
+So, 16635 * 512 = 8517120 bytes 
 
-8517362 / (1024 * 1024) = roughly 8mb
+8517120 / (1024 * 1024) = roughly 8mb
 
-So max file sizes is roughly 8mb or exactly 8517362 bytes
+So max file sizes is roughly 8mb or exactly 8517120 bytes
 
 ---- SYNCHRONIZATION ----
 
@@ -115,10 +116,38 @@ thread releases the lock.
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+In thread.h for struct thread we have a struct member
+struct dir* cur_dir; /*the current directory the thread/process is in (cwd)*/
+
+In inode.h we have additional members for inode_disk that we added for subdirectories
+struct inode_disk 
+    uint32_t file_or_dir;    /*int that represents if the disk is storing an
+                            file or a directory 0 for file 1 for directory*/ 
+
+
 ---- ALGORITHMS ----
 
 >> B2: Describe your code for traversing a user-specified path.  How
 >> do traversals of absolute and relative paths differ?
+
+The code for traversing a user-specified path is basically all done
+in a helper function of char * traverse_path (const char *name, struct dir **directory).
+First of all it starts by seperating absolute bs realtive paths. If the path starts with
+a / then it is an absolute path and as such we start at the root directory. On the other
+hand if it doesn't start with a / then it is a realtive path and we start with the 
+processes/threads current directory which is stored as a paramater in the thread struct.
+From there using the strtok_r method as explained in string.c we can break our path into
+tokens seperated by the / delimiter. This is very convenient as each token would be the next
+directory we have to go to. Then in a while loop we use strtok_r to continue on the
+subdirectory path by using dir_lookup on the current subdirectory so we can go to the next 
+subdirectory. We repeat this until we have the final token as the final token in the path 
+would be the possible filename or dirname to create,open or remove (i.e a/b/c/d d can be 
+a filename to create, it is not necessarily a directory). So once we stop at the last token
+which is a name for a directory or file we return it to do whatever we need. Also when going
+through subdirectories to reach our path destiniation we also note that we implemented the '.'
+and '..' special names/directory entries. '.' representing the current directory while
+'..' represents the parent directory. Also because we use stringtok_r method unconventional,
+but acceptable paths such as a//b would work as well, behaving the same way as a/b.
 
 ---- SYNCHRONIZATION ----
 
@@ -156,6 +185,24 @@ with an error.
 
 >> B6: Explain why you chose to represent the current directory of a
 >> process the way you did.
+
+We chose to represent the current directory of a process as a struct dir* cur_dir;
+in the thread/processes thread struct. We represented it this way so that different
+processes each have their own seperate current directory. This is because after 
+exec is called and the child process inherits the parents directorythe two processes
+directories are completely independent. So obviously storing the directories as struct dir*
+was the most logical way to store a processes current directory. It is easy for a process 
+to access (just need to do thread_current() to get thread/process paramters) and the struct 
+dir obviously has everything a process needs as it is the struct designed for dirs. One important thing 
+to mention is that when the child process inherits the parents directory we don't just set the directory 
+as an equivalence with '='. If we did that then both processes would share the same directory no matter what
+and they wouldn't be independent. So instead the child processes would use the dir_reopen function
+to get their own independent directory that is still the same directory as the parent (this is in the sense 
+that they have the same directory struct, but the pointers aren't the same so they can change them without
+affecting one another). Once again because we use a struct dir* and because of the way the struct dir has an 
+inode in it 2 processes can have the same directory info while not being stuck together (can move to 
+different directories).
+
 
 
                SURVEY QUESTIONS
