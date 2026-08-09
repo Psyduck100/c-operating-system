@@ -203,6 +203,10 @@ thread_create (const char *name, int priority, thread_func *function,
   /* set parent for new thread */
   t->parent = cur_t;
 
+  if (t->parent->cur_dir != NULL){
+    t->cur_dir = dir_reopen (t->parent->cur_dir);
+  }
+
   old_level = intr_disable ();
   /* add new thread as child of current thread*/
   list_push_back (&cur_t->child_list, &t->child_elem);

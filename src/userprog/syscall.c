@@ -1,5 +1,7 @@
 #include "userprog/syscall.h"
 
+#include "filesys/directory.h"
+#include "filesys/inode.h"
 #include "devices/input.h"
 #include "devices/shutdown.h"
 #include "filesys/file.h"
@@ -10,6 +12,8 @@
 #include "userprog/process.h"
 #include <stdio.h>
 #include <syscall-nr.h>
+
+#define READDIR_MAX_LEN 14
 
 static void syscall_handler (struct intr_frame *);
 static int get_user (const uint8_t *uaddr);
@@ -26,13 +30,15 @@ static unsigned tell (int fd);
 static void close (int fd);
 static pid_t exec (const char *cmdline);
 static int wait (pid_t pid);
-
-struct lock filesys_lock;
+static bool chdir (const char *dir);
+static bool mkdir (const char *dir);
+static bool readdir (int fd, char name[READDIR_MAX_LEN + 1]);
+static bool isdir (int fd);
+static int inumber (int fd);
 
 void
 syscall_init (void)
 {
-  lock_init (&filesys_lock);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -59,6 +65,20 @@ get_file (int fd)
     }
   return t->fd_table[fd];
 }
+
+/* Returns true if file is a directory, false if it's a regular file */
+static bool
+file_is_directory (struct file *file)
+{
+  if (file == NULL)
+    {
+      return false;
+    }
+    struct inode *inode = file_get_inode (file);
+    return inode->data.file_or_dir == 1;
+}
+
+
 
 /*checks if a pointer is valid. Returns false if invalid
   and true otherwise*/
@@ -260,6 +280,47 @@ syscall_handler (struct intr_frame *f UNUSED)
         exit (-1);
       close (args[0]);
       break;
+    
+    case SYS_CHDIR:
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
+      if (!success)
+        exit (-1);
+      if (!check_pointer ((uint8_t *)args[0]))
+        exit (-1);
+      f->eax = chdir((char *)args[0]);
+      break;
+    
+    case SYS_MKDIR:
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
+      if (!success)
+        exit (-1);
+      if (!check_pointer ((uint8_t *)args[0]))
+        exit (-1);
+      f->eax = mkdir ((char *)args[0]);
+      break;
+      
+    case SYS_READDIR:
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
+      if (!success)
+        exit (-1);
+      if (!check_pointer ((uint8_t *)args[1]))
+        exit (-1);
+      f->eax = readdir(args[0], (char *)args[1]);
+      break;
+
+    case SYS_ISDIR:
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
+      if (!success)
+        exit (-1);
+      f->eax = isdir(args[0]);
+      break; 
+    
+    case SYS_INUMBER:
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
+      if (!success)
+        exit (-1);
+      f->eax = inumber(args[0]);
+      break; 
 
     default:
       exit (-1);
@@ -290,9 +351,7 @@ exit (int status)
     {
       struct file *f = t->running_file;
       t->running_file = NULL;
-      lock_acquire (&filesys_lock);
       file_close (f);
-      lock_release (&filesys_lock);
     }
 
   // prints exit message
@@ -331,10 +390,8 @@ create (const char *file, unsigned initial_size)
   if (file == NULL)
     return false;
 
-  /* Acquire the global lock to avoid race conditions */
-  lock_acquire (&filesys_lock);
   bool result = filesys_create (file, initial_size);
-  lock_release (&filesys_lock);
+
   return result;
 }
 
@@ -345,10 +402,9 @@ remove (const char *file)
   if (file == NULL)
     return false;
 
-  /* Acquire the global lock to avoid race conditions */
-  lock_acquire (&filesys_lock);
+
   bool result = filesys_remove (file);
-  lock_release (&filesys_lock);
+
   return result;
 }
 
@@ -361,10 +417,8 @@ open (const char *file)
   if (file == NULL)
     return -1;
 
-  /* Acquire the global lock to avoid race conditions */
-  lock_acquire (&filesys_lock);
+
   struct file *f = filesys_open (file);
-  lock_release (&filesys_lock);
 
   if (f == NULL)
     return -1;
@@ -394,10 +448,7 @@ filesize (int fd)
   if (f == NULL)
     return -1;
 
-  /* Acquire the global lock to avoid race conditions */
-  lock_acquire (&filesys_lock);
   int size = file_length (f);
-  lock_release (&filesys_lock);
   return size;
 }
 
@@ -426,10 +477,7 @@ read (int fd, void *buffer, unsigned size)
   if (f == NULL)
     return -1;
 
-  /* Acquire the global lock to avoid race conditions */
-  lock_acquire (&filesys_lock);
   int bytes_read = file_read (f, buffer, size);
-  lock_release (&filesys_lock);
   return bytes_read;
 }
 
@@ -450,10 +498,7 @@ write (int fd, const void *buffer, unsigned size)
   if (f == NULL)
     return -1;
 
-  /* Acquire the global lock to avoid race conditions */
-  lock_acquire (&filesys_lock);
   int bytes_written = file_write (f, buffer, size);
-  lock_release (&filesys_lock);
   return bytes_written;
 }
 
@@ -467,10 +512,9 @@ seek (int fd, unsigned position)
   if (f == NULL)
     return;
 
-  /* Acquire the global lock to avoid race conditions */
-  lock_acquire (&filesys_lock);
+
   file_seek (f, position);
-  lock_release (&filesys_lock);
+
 }
 
 /* Returns the current read/write position of the file at FD */
@@ -482,10 +526,9 @@ tell (int fd)
   if (f == NULL)
     return -1;
 
-  /* Acquire the global lock to avoid race conditions */
-  lock_acquire (&filesys_lock);
+
   unsigned position = file_tell (f);
-  lock_release (&filesys_lock);
+
   return position;
 }
 
@@ -501,8 +544,91 @@ close (int fd)
 
   thread_current ()->fd_table[fd] = NULL;
 
-  /* Acquire the global lock to avoid race conditions */
-  lock_acquire (&filesys_lock);
+
   file_close (f);
-  lock_release (&filesys_lock);
+
+}
+
+/* Return true if fd is a directory, false if fd is an ordinary file */
+static bool
+isdir (int fd)
+{
+  struct file *f = get_file (fd);
+  if (f == NULL)
+    return false;
+
+  return file_is_directory (f);
+}
+
+/* Returns the inode number of the inode associated with fd */
+static int 
+inumber (int fd)
+{
+  struct file *f = get_file (fd);
+  if (f == NULL)
+    return -1;
+
+  struct inode *inode = file_get_inode (f);
+  return inode->sector;
+}
+
+/* Creates the directory DIR. Returns true if successful, false if not. */
+static bool
+mkdir (const char *dir) {
+  return filesys_dir_create (dir);
+}
+
+/* Changes the current woring directory to dir.
+   Returns true if successful, false if not. */
+static bool
+chdir (const char *dir) {
+  struct dir *parent = NULL;
+  char *entry_name = traverse_path(dir, &parent);
+
+  if (parent == NULL) {
+    return false;
+  }
+
+  struct dir *target = NULL;
+
+  /* If there is a final component to the arg */
+  if (entry_name != NULL) {
+    struct inode *inode = NULL;
+    if (!dir_lookup(parent, entry_name, &inode)) {
+      dir_close(parent);
+      return false;
+    }
+
+    dir_close(parent);
+    target = dir_open(inode);
+
+    if (target == NULL) {
+      inode_close(inode);
+      return false;
+    }
+  }
+
+  /* No final component to arg */
+  else {
+    target = parent;
+  }
+
+  /* Replace current working directory */
+  struct thread *cur = thread_current();
+  dir_close(cur->cur_dir);
+  cur->cur_dir = target;
+
+  return true;
+}
+
+/* Reads a directory entry from file descriptor fd which must represent a directory
+   If successful store file name in name and return true*/
+static bool
+readdir (int fd, char name[READDIR_MAX_LEN + 1]) {
+  struct file *f = get_file(fd);
+  if (f == NULL || !file_is_directory(f)) {
+    return false;
+  }
+
+  return dir_readdir((struct dir *)f, name);
 }

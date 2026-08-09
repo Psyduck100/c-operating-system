@@ -5,6 +5,7 @@
 #include "filesys/inode.h"
 #include "threads/thread.h"
 #include <debug.h>
+#include "threads/synch.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -58,6 +59,7 @@ traverse_path (const char *name, struct dir **directory)
     }
   else
     {
+      ASSERT(thread_current ()->cur_dir != NULL);
       cur_dir = dir_reopen (thread_current ()->cur_dir);
     }
 
@@ -118,14 +120,39 @@ traverse_path (const char *name, struct dir **directory)
   return token;
 }
 
-/* Creates a file or directory named NAME with the given INITIAL_SIZE.
-   file_or_dir represents whether  it is a file or directory.
-   If it is a file it is 0 and if directory it is 1.
+/* Creates a dir named NAME with the given INITIAL_SIZE.
+   Returns true if successful, false otherwise.
+   Fails if a dir named NAME already exists,
+   or if internal memory allocation fails. */
+bool
+filesys_dir_create (const char *name)
+{
+  block_sector_t inode_sector = 0;
+  struct dir *dir = NULL;
+
+  char *entry_name = traverse_path (name, &dir);
+  
+   block_sector_t parent_sector = dir->inode->sector;
+
+  bool success = (dir != NULL && free_map_allocate (1, &inode_sector)
+                  && dir_create (inode_sector, 2 , parent_sector)
+                  && dir_add (dir, entry_name, inode_sector));
+
+  if (!success && inode_sector != 0)
+    free_map_release (inode_sector, 1);
+
+  dir_close (dir);
+
+  return success;
+}
+
+
+/* Creates a file  named NAME with the given INITIAL_SIZE.
    Returns true if successful, false otherwise.
    Fails if a file named NAME already exists,
    or if internal memory allocation fails. */
 bool
-filesys_create (const char *name, off_t initial_size, int file_or_dir)
+filesys_create (const char *name, off_t initial_size)
 {
   block_sector_t inode_sector = 0;
   struct dir *dir;
@@ -133,8 +160,9 @@ filesys_create (const char *name, off_t initial_size, int file_or_dir)
   char *entry_name = traverse_path (name, &dir);
 
   bool success = (dir != NULL && free_map_allocate (1, &inode_sector)
-                  && inode_create (inode_sector, initial_size, file_or_dir)
+                  && inode_create (inode_sector, initial_size, 0)
                   && dir_add (dir, entry_name, inode_sector));
+
   if (!success && inode_sector != 0)
     free_map_release (inode_sector, 1);
 
@@ -189,7 +217,7 @@ filesys_remove (const char *name)
   /* if its a directory u can only remove if its empty
   so we check if its empty. If its not empty we return false
   and don't remove it*/
-  if (inode->data->file_or_dir == 1)
+  if (inode->data.file_or_dir == 1)
     {
 
       /*open the directory*/
@@ -234,7 +262,7 @@ do_format (void)
 {
   printf ("Formatting file system...");
   free_map_create ();
-  if (!dir_create (ROOT_DIR_SECTOR, 16))
+  if (!dir_create (ROOT_DIR_SECTOR, 16, ROOT_DIR_SECTOR))
     PANIC ("root directory creation failed");
   free_map_close ();
   printf ("done.\n");

@@ -8,8 +8,6 @@
 typedef int pid_t;
 #define PID_ERROR ((pid_t) -1)
 
-extern struct lock filesys_lock;
-
 void syscall_init (void);
 void exit (int status);
 #endif /* userprog/syscall.h */

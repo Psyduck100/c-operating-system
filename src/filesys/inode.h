@@ -4,11 +4,45 @@
 #include <stdbool.h>
 #include "filesys/off_t.h"
 #include "devices/block.h"
+#include <list.h>
+#include "threads/synch.h"
+
+/* Identifies an inode. */
+#define INODE_MAGIC 0x494e4f44
+#define NUM_DIRECT 123
+#define PTRS_PER_SECTOR 128
+#define NOT_ALLOCATED ((block_sector_t) -1)
+typedef uint32_t block_sector_t;
+
+/* On-disk inode.
+   Must be exactly BLOCK_SECTOR_SIZE bytes long. */
+struct inode_disk
+  {
+    uint32_t file_or_dir;                     /*int that represents if the disk is storing an 
+                                          file or a directory 0 for file 1 for directory*/
+    off_t length;                       /* File size in bytes. */
+    unsigned magic;                     /* Magic number. */
+    block_sector_t direct[NUM_DIRECT];  /* direct pointer to disk data sectors */
+    block_sector_t indirect;            /* indirect sector containing direct data sectors*/
+    block_sector_t double_indirect;     /* double indirect sector containing indirect_direct sectors*/
+  };
+
+/* In-memory inode. */
+struct inode 
+  {
+    struct list_elem elem;              /* Element in inode list. */
+    block_sector_t sector;              /* Sector number of disk location. */
+    int open_cnt;                       /* Number of openers. */
+    bool removed;                       /* True if deleted, false otherwise. */
+    int deny_write_cnt;                 /* 0: writes ok, >0: deny writes. */
+    struct inode_disk data;             /* Inode content. */
+    struct lock inode_lock;              /*Inode level lock*/
+  };
 
 struct bitmap;
 
 void inode_init (void);
-bool inode_create (block_sector_t, off_t);
+bool inode_create (block_sector_t, off_t, int file_or_dir);
 struct inode *inode_open (block_sector_t);
 struct inode *inode_reopen (struct inode *);
 block_sector_t inode_get_inumber (const struct inode *);

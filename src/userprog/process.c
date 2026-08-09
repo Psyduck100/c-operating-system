@@ -18,8 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#define MAX_CLA_ITEMS 64
+#include "threads/malloc.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -143,10 +142,8 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
 
-  /* acquire global lock before loading file */
-  lock_acquire (&filesys_lock);
+
   success = load (prog_name, &if_.eip, &if_.esp);
-  lock_release (&filesys_lock);
 
   // Free copy
   palloc_free_page (fn_copy);
@@ -174,24 +171,54 @@ start_process (void *file_name_)
      and jump to it. */
   if (success)
     {
-      char *saveptr;
+      // Count tokens to temp copy
+      char *count_copy = palloc_get_page (0);
+      if (count_copy == NULL)
+        {
+          palloc_free_page (file_name);
+          thread_exit ();
+        }
+      strlcpy (count_copy, file_name, PGSIZE);
+
+      char *saveptr_count;
       char *token;
       int argc = 0;
-      char *argv[MAX_CLA_ITEMS + 1];
 
-      token = strtok_r (file_name, " ", &saveptr);
-
-      // Parse the CLA
-      while (token != NULL)
+      char *token_count = strtok_r (count_copy, " ", &saveptr_count);
+      while (token_count != NULL)
         {
-          argv[argc] = token;
           argc++;
-          token = strtok_r (NULL, " ", &saveptr);
+          token_count = strtok_r (NULL, " ", &saveptr_count);
+        }
+      palloc_free_page (count_copy);
+
+      // Allocate argv array and user stack address array
+      char **argv = malloc (sizeof (char *) * argc);
+      if (argv == NULL)
+        {
+          palloc_free_page (file_name);
+          thread_exit ();
         }
 
-      argv[argc] = NULL;
+      char **user_stack_address = malloc (sizeof (char *) * argc);
+      if (user_stack_address == NULL)
+        {
+          free (argv);
+          palloc_free_page (file_name);
+          thread_exit ();
+        }
 
-      char *user_stack_address[argc];
+      // Tokenize the command line arguments
+      char *saveptr;
+      int index = 0;
+      token = strtok_r (file_name, " ", &saveptr);
+      while (token != NULL)
+        {
+          argv[index] = token;
+          index++;
+          token = strtok_r (NULL, " ", &saveptr);
+        }
+      argv[argc] = NULL; // Null-terminate the argv array
 
       // Build User Stack: add parsed CLA
       int total_arg_chars = 0;
@@ -234,7 +261,12 @@ start_process (void *file_name_)
       // Add fake return address
       if_.esp -= 4;
       *(uint32_t *)if_.esp = 0;
+
+      // Free allocated memory
+      free (argv);
+      free (user_stack_address);
     }
+
 
   palloc_free_page (file_name);
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g"(&if_) : "memory");
@@ -326,10 +358,8 @@ process_exit (void)
         {
           if (cur->fd_table[i] != NULL)
             {
-              lock_acquire (&filesys_lock);
               file_close (cur->fd_table[i]);
               cur->fd_table[i] = NULL;
-              lock_release (&filesys_lock);
             }
         }
       palloc_free_page (cur->fd_table);
@@ -340,9 +370,7 @@ process_exit (void)
     {
       struct file *f = cur->running_file;
       cur->running_file = NULL;
-      lock_acquire (&filesys_lock);
       file_close (f);
-      lock_release (&filesys_lock);
     }
 
   /* Destroy the current process's page directory and switch back
