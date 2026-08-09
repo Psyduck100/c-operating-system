@@ -268,6 +268,7 @@ inode_create (block_sector_t sector, off_t length, int file_or_dir)
 
   ino->data.length = (i == new_blocks) ? length : i * BLOCK_SECTOR_SIZE;
   block_write(fs_device, ino->sector, &ino->data);
+  inode_close(ino);
 
   return i == new_blocks;
 
@@ -456,13 +457,15 @@ inode_open (block_sector_t sector)
     return NULL;
 
   /* Initialize. */
-  list_push_front (&open_inodes, &inode->elem);
   inode->sector = sector;
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
   lock_init(&inode->inode_lock);
   lock_init(&inode->dir_lock);
+
+  list_push_front (&open_inodes, &inode->elem);
+
   block_read (fs_device, inode->sector, &inode->data);
   return inode;
 }
@@ -508,7 +511,7 @@ inode_close (struct inode *inode)
           off_t num_blocks = bytes_to_sectors(inode->data.length);
           for (int i = 0; i < num_blocks; i++) {
             block_sector_t sector = byte_to_sector(inode, i * BLOCK_SECTOR_SIZE, false);
-            if (sector != 0) {
+            if (sector != NOT_ALLOCATED) {
               free_map_release(sector, 1);
             }
           }
@@ -764,6 +767,11 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
 //   return bytes_written;
 // }
 
+/* Writes SIZE bytes from BUFFER into INODE, starting at OFFSET.
+   Returns the number of bytes actually written, which may be
+   less than SIZE if end of file is reached or an error occurs.
+   (Normally a write at end of file would extend the inode, but
+   growth is not yet implemented.) */
 off_t
 inode_write_at (struct inode *inode, const void *buffer_, off_t size,
                 off_t offset) 

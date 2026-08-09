@@ -474,7 +474,7 @@ read (int fd, void *buffer, unsigned size)
     }
 
   struct file *f = get_file (fd);
-  if (f == NULL)
+  if (f == NULL || file_is_directory (f))
     return -1;
 
   int bytes_read = file_read (f, buffer, size);
@@ -495,7 +495,7 @@ write (int fd, const void *buffer, unsigned size)
     }
 
   struct file *f = get_file (fd);
-  if (f == NULL)
+  if (f == NULL || file_is_directory(f))
     return -1;
 
   int bytes_written = file_write (f, buffer, size);
@@ -630,5 +630,13 @@ readdir (int fd, char name[READDIR_MAX_LEN + 1]) {
     return false;
   }
 
-  return dir_readdir((struct dir *)f, name);
+  struct inode *inode = inode_reopen(f->inode);
+
+  struct dir *cur_dir = dir_open(inode);
+
+  bool success =  dir_readdir(cur_dir, name);
+
+  dir_close(cur_dir);
+
+  return success;
 }
