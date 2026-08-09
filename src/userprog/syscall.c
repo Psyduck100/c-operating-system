@@ -633,8 +633,11 @@ readdir (int fd, char name[READDIR_MAX_LEN + 1]) {
   struct inode *inode = inode_reopen(f->inode);
 
   struct dir *cur_dir = dir_open(inode);
+  cur_dir->pos = f->pos;
 
   bool success =  dir_readdir(cur_dir, name);
+
+  f->pos = cur_dir->pos;
 
   dir_close(cur_dir);
 
