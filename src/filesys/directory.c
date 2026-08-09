@@ -186,7 +186,6 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   strlcpy (e.name, name, sizeof e.name);
   e.inode_sector = inode_sector;
   success = inode_write_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
-  ASSERT(success == true);
 
 done:
   lock_release (&dir->inode->dir_lock);

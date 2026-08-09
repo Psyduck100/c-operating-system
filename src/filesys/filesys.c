@@ -86,7 +86,6 @@ traverse_path (const char *name, struct dir **directory)
       return NULL;
     }
 
-  int count = 0;
   /*go to the directory based on the path*/
   while (token != NULL)
     {
@@ -128,7 +127,6 @@ traverse_path (const char *name, struct dir **directory)
 
       token = next_token;
 
-      count++;
     }
 
   *directory = cur_dir;
