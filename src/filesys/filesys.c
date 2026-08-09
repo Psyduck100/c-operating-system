@@ -8,6 +8,7 @@
 #include "threads/synch.h"
 #include <stdio.h>
 #include <string.h>
+#include "threads/malloc.h"
 
 /* Partition that contains the file system. */
 struct block *fs_device;
@@ -28,6 +29,9 @@ filesys_init (bool format)
 
   if (format)
     do_format ();
+
+  /*set initial thread to root directory*/
+  thread_current()->cur_dir = dir_open_root();
 
   free_map_open ();
 }
@@ -51,6 +55,11 @@ traverse_path (const char *name, struct dir **directory)
 
   struct dir *cur_dir;
 
+  if (name == NULL){
+    *directory = NULL;
+    return NULL;
+  }
+
   /*get the directory path from the name*/
   /*if its an absolute path start at the root directory*/
   if (name[0] == '/')
@@ -70,6 +79,12 @@ traverse_path (const char *name, struct dir **directory)
 
   char *token, *save_ptr;
   token = strtok_r (s, "/", &save_ptr);
+
+  if (token  == NULL){
+    *directory = NULL;
+    dir_close(cur_dir);
+    return NULL;
+  }
 
   /*go to the directory based on the path*/
   while (token != NULL)
@@ -110,14 +125,17 @@ traverse_path (const char *name, struct dir **directory)
         }
 
       inode_close (next_dir_inode);
-
       token = next_token;
     }
 
   *directory = cur_dir;
 
+  char *entry_name = malloc(strlen(token) + 1);
+
   /*the last token after breaking out of loop is the entry_name*/
-  return token;
+  strlcpy (entry_name, token, strlen(token) + 1);
+
+  return entry_name;
 }
 
 /* Creates a dir named NAME with the given INITIAL_SIZE.
@@ -132,17 +150,22 @@ filesys_dir_create (const char *name)
 
   char *entry_name = traverse_path (name, &dir);
   
+  if (dir == NULL){
+    free(entry_name);
+    return false;
+  }
    block_sector_t parent_sector = dir->inode->sector;
 
-  bool success = (dir != NULL && free_map_allocate (1, &inode_sector)
+  bool success = (free_map_allocate (1, &inode_sector)
                   && dir_create (inode_sector, 2 , parent_sector)
                   && dir_add (dir, entry_name, inode_sector));
 
-  if (!success && inode_sector != 0)
+  if (!success && inode_sector != 0){
     free_map_release (inode_sector, 1);
+  }
 
   dir_close (dir);
-
+  free(entry_name);
   return success;
 }
 
@@ -163,11 +186,12 @@ filesys_create (const char *name, off_t initial_size)
                   && inode_create (inode_sector, initial_size, 0)
                   && dir_add (dir, entry_name, inode_sector));
 
-  if (!success && inode_sector != 0)
+  if (!success && inode_sector != 0){
     free_map_release (inode_sector, 1);
+  }
 
   dir_close (dir);
-
+  free(entry_name);
   return success;
 }
 
@@ -182,11 +206,24 @@ filesys_open (const char *name)
   struct dir *dir;
   struct inode *inode = NULL;
 
+  /*special case for opening root directory "/"*/
+  if (strcmp(name, "/") == 0){
+    
+    dir = dir_open_root();
+    if (dir != NULL){
+      inode = inode_reopen(dir->inode);
+      dir_close (dir);
+    }
+    return file_open (inode);
+  }
+
   char *entry_name = traverse_path (name, &dir);
+
 
   if (dir != NULL)
     dir_lookup (dir, entry_name, &inode);
   dir_close (dir);
+  free(entry_name);
 
   return file_open (inode);
 }

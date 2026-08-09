@@ -146,7 +146,7 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
 
   /*acquire inode lock for this directory as we want  
   operations on the same directory to wait for one another.*/
-  lock_acquire(&dir->inode->inode_lock);
+  lock_acquire(&dir->inode->dir_lock);
 
   struct dir_entry e;
   off_t ofs;
@@ -156,8 +156,10 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   ASSERT (name != NULL);
 
   /* Check NAME for validity. */
-  if (*name == '\0' || strlen (name) > NAME_MAX)
+  if (*name == '\0' || strlen (name) > NAME_MAX) {
+    lock_release(&dir->inode->dir_lock);
     return false;
+  }
 
   /* Check that NAME is not in use. */
   if (lookup (dir, name, NULL, NULL))
@@ -182,7 +184,7 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   success = inode_write_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
 
  done:
-  lock_release(&dir->inode->inode_lock);
+  lock_release(&dir->inode->dir_lock);
   return success;
 }
 
@@ -195,7 +197,7 @@ dir_remove (struct dir *dir, const char *name)
 
   /*acquire inode lock for this directory as we want  
   operations on the same directory to wait for one another.*/
-  lock_acquire(&dir->inode->inode_lock);
+  lock_acquire(&dir->inode->dir_lock);
 
   struct dir_entry e;
   struct inode *inode = NULL;
@@ -225,7 +227,7 @@ dir_remove (struct dir *dir, const char *name)
 
  done:
   inode_close (inode);
-  lock_release(&dir->inode->inode_lock);
+  lock_release(&dir->inode->dir_lock);
   return success;
 }
 
