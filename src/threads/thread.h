@@ -98,6 +98,8 @@ struct thread
 
   struct thread *parent; /* Pointer to the parent thread/process*/
 
+  struct dir* cur_dir; /*the current directory the thread is in*/
+
   int exit_status;
 
   struct list_elem child_elem; /* List element for a child process.

@@ -10,6 +10,7 @@
 #include <random.h>
 #include <stddef.h>
 #include <stdio.h>
+#include "filesys/directory.h"
 #include <string.h>
 #ifdef USERPROG
 #include "threads/palloc.h"
@@ -486,6 +487,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *)t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+  t->cur_dir = NULL;
 
   old_level = intr_disable ();
 
