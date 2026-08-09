@@ -193,10 +193,22 @@ filesys_create (const char *name, off_t initial_size)
 
   char *entry_name = traverse_path (name, &dir);
 
-  bool success = (dir != NULL && free_map_allocate (1, &inode_sector)
-                  && inode_create (inode_sector, initial_size, 0)
-                  && dir_add (dir, entry_name, inode_sector));
+  // bool success = (dir != NULL && free_map_allocate (1, &inode_sector)
+  //                 && inode_create (inode_sector, initial_size, 0)
+  //                 && dir_add (dir, entry_name, inode_sector));
 
+
+  bool success = false;
+
+  if (dir != NULL
+      && free_map_allocate (1, &inode_sector)
+      && inode_create (inode_sector, initial_size, 0))
+    {
+      // printf ("FILESYS_CREATE: name='%s', inode_sector=%u, parent_sector=%u\n",
+      //         entry_name, inode_sector, dir->inode->sector);
+
+      success = dir_add (dir, entry_name, inode_sector);
+    }
   if (!success && inode_sector != 0)
     {
       free_map_release (inode_sector, 1);

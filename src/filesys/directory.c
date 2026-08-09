@@ -127,11 +127,16 @@ dir_lookup (const struct dir *dir, const char *name, struct inode **inode)
 
   ASSERT (dir != NULL);
   ASSERT (name != NULL);
+  lock_acquire (&dir->inode->dir_lock);
+  bool found = lookup (dir, name, &e, NULL);
+  lock_release (&dir->inode->dir_lock);
 
-  if (lookup (dir, name, &e, NULL))
-    *inode = inode_open (e.inode_sector);
-  else
+  if (found) {
+    *inode = inode_open(e.inode_sector);
+  }
+  else{
     *inode = NULL;
+  }
 
   return *inode != NULL;
 }
@@ -185,6 +190,16 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   e.in_use = true;
   strlcpy (e.name, name, sizeof e.name);
   e.inode_sector = inode_sector;
+  // if (dir->inode->sector == ROOT_DIR_SECTOR)
+  // {
+  //   printf ("DIR_ADD ROOT: name='%s', inode_sector=%u, ofs=%d\n",
+  //           e.name, e.inode_sector, ofs);
+
+  //   printf ("  name bytes:");
+  //   for (int i = 0; i < sizeof e.name; i++)
+  //     printf (" %02x", (unsigned char) e.name[i]);
+  //   printf ("\n");
+  // }
   success = inode_write_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
 
 done:
