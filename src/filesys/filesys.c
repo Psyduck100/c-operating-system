@@ -186,10 +186,10 @@ filesys_create (const char *name, off_t initial_size)
   then attempts to create newfiles  
   in a deleted directory must be disallowed so return null.
   (first need to make sure its not an absolute path)*/
-  /*if (name[0] != '/' && thread_current ()->cur_dir->inode->removed == true)
+  if (name[0] != '/' && thread_current ()->cur_dir->inode->removed == true)
     {
       return false;
-    }*/
+    }
 
   char *entry_name = traverse_path (name, &dir);
 
@@ -235,10 +235,10 @@ filesys_open (const char *name)
   then attempts to open files (including . and ..)
   in a deleted directory must be disallowed so return null.
   (first need to make sure its not an absolute path)*/
-  /*if (name[0] != '/' && thread_current ()->cur_dir->inode->removed == true)
+  if (name[0] != '/' && thread_current ()->cur_dir->inode->removed == true)
     {
       return NULL;
-    }*/
+    }
 
   char *entry_name = traverse_path (name, &dir);
 
