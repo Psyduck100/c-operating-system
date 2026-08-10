@@ -131,11 +131,12 @@ traverse_path (const char *name, struct dir **directory)
   *directory = cur_dir;
 
   char *entry_name = malloc (strlen (token) + 1);
-  if (entry_name ==NULL){
-    *directory = NULL;
-    dir_close (cur_dir);
-    return NULL;
-  }
+  if (entry_name == NULL)
+    {
+      *directory = NULL;
+      dir_close (cur_dir);
+      return NULL;
+    }
 
   /*the last token after breaking out of loop is the entry_name*/
   strlcpy (entry_name, token, strlen (token) + 1);
@@ -188,7 +189,7 @@ filesys_create (const char *name, off_t initial_size)
   struct dir *dir;
 
   /*check if the current directory is "removed" and if it is
-  then attempts to create newfiles  
+  then attempts to create newfiles
   in a deleted directory must be disallowed so return null.
   (first need to make sure its not an absolute path)*/
   if (name[0] != '/' && thread_current ()->cur_dir->inode->removed == true)
@@ -202,14 +203,13 @@ filesys_create (const char *name, off_t initial_size)
   //                 && inode_create (inode_sector, initial_size, 0)
   //                 && dir_add (dir, entry_name, inode_sector));
 
-
   bool success = false;
 
-  if (dir != NULL
-      && free_map_allocate (1, &inode_sector)
+  if (dir != NULL && free_map_allocate (1, &inode_sector)
       && inode_create (inode_sector, initial_size, 0))
     {
-      // printf ("FILESYS_CREATE: name='%s', inode_sector=%u, parent_sector=%u\n",
+      // printf ("FILESYS_CREATE: name='%s', inode_sector=%u,
+      // parent_sector=%u\n",
       //         entry_name, inode_sector, dir->inode->sector);
 
       success = dir_add (dir, entry_name, inode_sector);

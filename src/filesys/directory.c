@@ -131,12 +131,14 @@ dir_lookup (const struct dir *dir, const char *name, struct inode **inode)
   bool found = lookup (dir, name, &e, NULL);
   lock_release (&dir->inode->dir_lock);
 
-  if (found) {
-    *inode = inode_open(e.inode_sector);
-  }
-  else{
-    *inode = NULL;
-  }
+  if (found)
+    {
+      *inode = inode_open (e.inode_sector);
+    }
+  else
+    {
+      *inode = NULL;
+    }
 
   return *inode != NULL;
 }
@@ -150,7 +152,6 @@ dir_lookup (const struct dir *dir, const char *name, struct inode **inode)
 bool
 dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
 {
-
 
   struct dir_entry e;
   off_t ofs;
@@ -214,7 +215,6 @@ bool
 dir_remove (struct dir *dir, const char *name)
 {
 
-
   struct dir_entry e;
   struct inode *inode = NULL;
   bool success = false;
@@ -262,9 +262,9 @@ dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
   while (inode_read_at (dir->inode, &e, sizeof e, dir->pos) == sizeof e)
     {
       dir->pos += sizeof e;
-      /*add code to make sure dir_readdir cannot return the special . 
+      /*add code to make sure dir_readdir cannot return the special .
       and .. directories*/
-      if (e.in_use && strcmp(e.name, ".") != 0 && strcmp(e.name, "..") != 0)
+      if (e.in_use && strcmp (e.name, ".") != 0 && strcmp (e.name, "..") != 0)
         {
           strlcpy (name, e.name, NAME_MAX + 1);
           return true;

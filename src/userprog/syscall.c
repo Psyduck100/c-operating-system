@@ -1,11 +1,10 @@
 #include "userprog/syscall.h"
-
-#include "filesys/directory.h"
-#include "filesys/inode.h"
 #include "devices/input.h"
 #include "devices/shutdown.h"
+#include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "filesys/inode.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
@@ -74,11 +73,9 @@ file_is_directory (struct file *file)
     {
       return false;
     }
-    struct inode *inode = file_get_inode (file);
-    return inode->data.file_or_dir == 1;
+  struct inode *inode = file_get_inode (file);
+  return inode->data.file_or_dir == 1;
 }
-
-
 
 /*checks if a pointer is valid. Returns false if invalid
   and true otherwise*/
@@ -280,16 +277,16 @@ syscall_handler (struct intr_frame *f UNUSED)
         exit (-1);
       close (args[0]);
       break;
-    
+
     case SYS_CHDIR:
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
       if (!success)
         exit (-1);
       if (!check_pointer ((uint8_t *)args[0]))
         exit (-1);
-      f->eax = chdir((char *)args[0]);
+      f->eax = chdir ((char *)args[0]);
       break;
-    
+
     case SYS_MKDIR:
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
       if (!success)
@@ -298,29 +295,29 @@ syscall_handler (struct intr_frame *f UNUSED)
         exit (-1);
       f->eax = mkdir ((char *)args[0]);
       break;
-      
+
     case SYS_READDIR:
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 2);
       if (!success)
         exit (-1);
       if (!check_pointer ((uint8_t *)args[1]))
         exit (-1);
-      f->eax = readdir(args[0], (char *)args[1]);
+      f->eax = readdir (args[0], (char *)args[1]);
       break;
 
     case SYS_ISDIR:
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
       if (!success)
         exit (-1);
-      f->eax = isdir(args[0]);
-      break; 
-    
+      f->eax = isdir (args[0]);
+      break;
+
     case SYS_INUMBER:
       success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
       if (!success)
         exit (-1);
-      f->eax = inumber(args[0]);
-      break; 
+      f->eax = inumber (args[0]);
+      break;
 
     default:
       exit (-1);
@@ -402,7 +399,6 @@ remove (const char *file)
   if (file == NULL)
     return false;
 
-
   bool result = filesys_remove (file);
 
   return result;
@@ -416,7 +412,6 @@ open (const char *file)
 {
   if (file == NULL)
     return -1;
-
 
   struct file *f = filesys_open (file);
 
@@ -495,7 +490,7 @@ write (int fd, const void *buffer, unsigned size)
     }
 
   struct file *f = get_file (fd);
-  if (f == NULL || file_is_directory(f))
+  if (f == NULL || file_is_directory (f))
     return -1;
 
   int bytes_written = file_write (f, buffer, size);
@@ -512,9 +507,7 @@ seek (int fd, unsigned position)
   if (f == NULL)
     return;
 
-
   file_seek (f, position);
-
 }
 
 /* Returns the current read/write position of the file at FD */
@@ -525,7 +518,6 @@ tell (int fd)
   struct file *f = get_file (fd);
   if (f == NULL)
     return -1;
-
 
   unsigned position = file_tell (f);
 
@@ -544,9 +536,7 @@ close (int fd)
 
   thread_current ()->fd_table[fd] = NULL;
 
-
   file_close (f);
-
 }
 
 /* Return true if fd is a directory, false if fd is an ordinary file */
@@ -561,7 +551,7 @@ isdir (int fd)
 }
 
 /* Returns the inode number of the inode associated with fd */
-static int 
+static int
 inumber (int fd)
 {
   struct file *f = get_file (fd);
@@ -574,72 +564,81 @@ inumber (int fd)
 
 /* Creates the directory DIR. Returns true if successful, false if not. */
 static bool
-mkdir (const char *dir) {
+mkdir (const char *dir)
+{
   return filesys_dir_create (dir);
 }
 
 /* Changes the current woring directory to dir.
    Returns true if successful, false if not. */
 static bool
-chdir (const char *dir) {
+chdir (const char *dir)
+{
   struct dir *parent = NULL;
-  char *entry_name = traverse_path(dir, &parent);
+  char *entry_name = traverse_path (dir, &parent);
 
-  if (parent == NULL) {
-    return false;
-  }
+  if (parent == NULL)
+    {
+      return false;
+    }
 
   struct dir *target = NULL;
 
   /* If there is a final component to the arg */
-  if (entry_name != NULL) {
-    struct inode *inode = NULL;
-    if (!dir_lookup(parent, entry_name, &inode)) {
-      dir_close(parent);
-      return false;
-    }
+  if (entry_name != NULL)
+    {
+      struct inode *inode = NULL;
+      if (!dir_lookup (parent, entry_name, &inode))
+        {
+          dir_close (parent);
+          return false;
+        }
 
-    dir_close(parent);
-    target = dir_open(inode);
+      dir_close (parent);
+      target = dir_open (inode);
 
-    if (target == NULL) {
-      inode_close(inode);
-      return false;
+      if (target == NULL)
+        {
+          inode_close (inode);
+          return false;
+        }
     }
-  }
 
   /* No final component to arg */
-  else {
-    target = parent;
-  }
+  else
+    {
+      target = parent;
+    }
 
   /* Replace current working directory */
-  struct thread *cur = thread_current();
-  dir_close(cur->cur_dir);
+  struct thread *cur = thread_current ();
+  dir_close (cur->cur_dir);
   cur->cur_dir = target;
 
   return true;
 }
 
-/* Reads a directory entry from file descriptor fd which must represent a directory
-   If successful store file name in name and return true*/
+/* Reads a directory entry from file descriptor fd which must represent a
+   directory If successful store file name in name and return true*/
 static bool
-readdir (int fd, char name[READDIR_MAX_LEN + 1]) {
-  struct file *f = get_file(fd);
-  if (f == NULL || !file_is_directory(f)) {
-    return false;
-  }
+readdir (int fd, char name[READDIR_MAX_LEN + 1])
+{
+  struct file *f = get_file (fd);
+  if (f == NULL || !file_is_directory (f))
+    {
+      return false;
+    }
 
-  struct inode *inode = inode_reopen(f->inode);
+  struct inode *inode = inode_reopen (f->inode);
 
-  struct dir *cur_dir = dir_open(inode);
+  struct dir *cur_dir = dir_open (inode);
   cur_dir->pos = f->pos;
 
-  bool success =  dir_readdir(cur_dir, name);
+  bool success = dir_readdir (cur_dir, name);
 
   f->pos = cur_dir->pos;
 
-  dir_close(cur_dir);
+  dir_close (cur_dir);
 
   return success;
 }
