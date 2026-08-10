@@ -153,11 +153,15 @@ subdirectories struct inode_disk
     uint32_t file_or_dir;    /*int that represents if the disk is storing an
                             file or a directory 0 for file 1 for directory*/ 
 
+And in inode.h we have an additional lock for the directory level
+  struct lock dir_lock;   /*Directory level lock */
+
 In inode.c we have an additional list and lock used for tracking open inodes /*
 List of open inodes, so that opening a single inode twice
    returns the same `struct inode'. */
 static struct list open_inodes; /* List of all open inodes. */ static struct
 lock open_inode_lock; /* Lock for open_inodes. */
+
 
 In freemap.c, we have an additional lock for the free map static struct lock
 free_map_lock; /* Lock for free map. */
