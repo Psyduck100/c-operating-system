@@ -124,6 +124,15 @@ struct inode_disk
     uint32_t file_or_dir;    /*int that represents if the disk is storing an
                             file or a directory 0 for file 1 for directory*/ 
 
+In inode.c we have an additional list and lock used for tracking open inodes
+/* List of open inodes, so that opening a single inode twice
+   returns the same `struct inode'. */
+static struct list open_inodes; /* List of all open inodes. */
+static struct lock open_inode_lock; /* Lock for open_inodes. */
+
+In freemap.c, we have an additional lock for the free map
+static struct lock free_map_lock; /* Lock for free map. */
+
 
 ---- ALGORITHMS ----
 
@@ -131,28 +140,33 @@ struct inode_disk
 >> do traversals of absolute and relative paths differ?
 
 The code for traversing a user-specified path is basically all done
-in a helper function of char * traverse_path (const char *name, struct dir **directory).
-First of all it starts by seperating absolute bs realtive paths. If the path starts with
-a / then it is an absolute path and as such we start at the root directory. On the other
-hand if it doesn't start with a / then it is a realtive path and we start with the 
-processes/threads current directory which is stored as a paramater in the thread struct.
-From there using the strtok_r method as explained in string.c we can break our path into
-tokens seperated by the / delimiter. This is very convenient as each token would be the next
-directory we have to go to. Then in a while loop we use strtok_r to continue on the
-subdirectory path by using dir_lookup on the current subdirectory so we can go to the next 
-subdirectory. We repeat this until we have the final token as the final token in the path 
-would be the possible filename or dirname to create,open or remove (i.e a/b/c/d d can be 
-a filename to create, it is not necessarily a directory). So once we stop at the last token
-which is a name for a directory or file we return it to do whatever we need. Also when going
-through subdirectories to reach our path destiniation we also note that we implemented the '.'
-and '..' special names/directory entries. '.' representing the current directory while
-'..' represents the parent directory. Also because we use stringtok_r method unconventional,
-but acceptable paths such as a//b would work as well, behaving the same way as a/b.
+in a helper function of char * traverse_path (const char *name, struct dir
+**directory). First of all it starts by seperating absolute bs realtive 
+paths. If the path starts with a / then it is an absolute path and as 
+such we start at the root directory. On the otherhand if it doesn't start with
+a / then it is a realtive path and we start with the processes/threads current
+directory which is stored as a paramater in the thread struct. From there
+using the strtok_r method as explained in string.c we can break our path into
+tokens seperated by the / delimiter. This is very convenient as each token 
+would be the next directory we have to go to. Then in a while loop we use 
+strtok_r to continue on the subdirectory path by using dir_lookup on the 
+current subdirectory so we can go to the next subdirectory. We repeat 
+this until we have the final token as the final token in the path 
+would be the possible filename or dirname to create,open or remove 
+(i.e a/b/c/d d can be a filename to create, it is not necessarily a 
+directory). So once we stop at the last token which is a name for a 
+directory or file we return it to do whatever we need. Also when going
+through subdirectories to reach our path destiniation we also note 
+that we implemented the '.' and '..' special names/directory entries.
+'.' representing the current directory while '..' represents the parent 
+directory. Also because we use stringtok_r method unconventional,
+but acceptable paths such as a//b would work as well, behaving the same way
+as a/b.
 
 ---- SYNCHRONIZATION ----
 
 >> B4: How do you prevent races on directory entries?  For example,
->> only one of two simultaneous attempts to remove a single file
+>> only one of two simultaneous attempts to remove a single file  
 >> should succeed, as should only one of two simultaneous attempts to
 >> create a file with the same name, and so on.
 
@@ -186,22 +200,26 @@ with an error.
 >> B6: Explain why you chose to represent the current directory of a
 >> process the way you did.
 
-We chose to represent the current directory of a process as a struct dir* cur_dir;
-in the thread/processes thread struct. We represented it this way so that different
-processes each have their own seperate current directory. This is because after 
-exec is called and the child process inherits the parents directorythe two processes
-directories are completely independent. So obviously storing the directories as struct dir*
-was the most logical way to store a processes current directory. It is easy for a process 
-to access (just need to do thread_current() to get thread/process paramters) and the struct 
-dir obviously has everything a process needs as it is the struct designed for dirs. One important thing 
-to mention is that when the child process inherits the parents directory we don't just set the directory 
-as an equivalence with '='. If we did that then both processes would share the same directory no matter what
-and they wouldn't be independent. So instead the child processes would use the dir_reopen function
-to get their own independent directory that is still the same directory as the parent (this is in the sense 
-that they have the same directory struct, but the pointers aren't the same so they can change them without
-affecting one another). Once again because we use a struct dir* and because of the way the struct dir has an 
-inode in it 2 processes can have the same directory info while not being stuck together (can move to 
-different directories).
+We chose to represent the current directory of a process as a 
+struct dir* cur_dir; in the thread/processes thread struct. We represented it 
+this way so that different processes each have their own seperate current 
+directory. This is because after exec is called and the child process inherits 
+the parents directorythe two processes directories are completely independent.
+So obviously storing the directories as struct dir* was the most logical way 
+to store a processes current directory. It is easy for a process to access 
+(just need to do thread_current() to get thread/process paramters) and the struct 
+dir obviously has everything a process needs as it is the struct designed for 
+dirs. One important thing to mention is that when the child process inherits 
+the parents directory we don't just set the directory as an equivalence 
+with '='. If we did that then both processes would share the same directory 
+no matter what and they wouldn't be independent. So instead the child 
+processes would use the dir_reopen function to get their own independent 
+directory that is still the same directory as the parent (this is in the sense 
+that they have the same directory struct, but the pointers aren't the same 
+so they can change them without affecting one another). Once again because 
+we use a struct dir* and because of the way the struct dir has an 
+inode in it 2 processes can have the same directory info while not 
+being stuck together (can move to different directories).
 
 
 
