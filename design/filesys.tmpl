@@ -1,63 +1,54 @@
+       	     +-------------------------+ | CSCC69                  | | PROJECT
+       	     4: FILE SYSTEMS | | DESIGN DOCUMENT         |
        	     +-------------------------+
-             | CSCC69                  |
-             | PROJECT 4: FILE SYSTEMS |
-             | DESIGN DOCUMENT         |
-             +-------------------------+
 
 ---- GROUP ----
 
 >> Fill in the names and email addresses of your group members.
 
-Arvindh Sengu arvindh.sengu@mail.utoronto.ca
-Alex Xu <alexxx.xu@mail.utoronto.ca>
-Roger Dai <roger.dai@mail.utoronto.ca>
+Arvindh Sengu arvindh.sengu@mail.utoronto.ca Alex Xu
+<alexxx.xu@mail.utoronto.ca> Roger Dai <roger.dai@mail.utoronto.ca>
 
 ---- PRELIMINARIES ----
 
->> If you have any preliminary comments on your submission, notes for the
->> TAs, or extra credit, please give them here.
+>> If you have any preliminary comments on your submission, notes for the >>
+TAs, or extra credit, please give them here.
 
->> Please cite any offline or online sources you consulted while
->> preparing your submission, other than the Pintos documentation, course
->> text, lecture notes, and course staff.
+>> Please cite any offline or online sources you consulted while >> preparing
+your submission, other than the Pintos documentation, course >> text, lecture
+notes, and course staff.
 
-             INDEXED AND EXTENSIBLE FILES
-             ============================
+             INDEXED AND EXTENSIBLE FILES ============================
 
 ---- DATA STRUCTURES ----
 
->> A1: Copy here the declaration of each new or changed `struct' or
->> `struct' member, global or static variable, `typedef', or
->> enumeration.  Identify the purpose of each in 25 words or less.
+>> A1: Copy here the declaration of each new or changed `struct' or >> `struct'
+member, global or static variable, `typedef', or >> enumeration.  Identify the
+purpose of each in 25 words or less.
 
-In inode.h we have additional members for inode_disk
-struct inode_disk 
-    block_sector_t direct[NUM_DIRECT];  /* direct pointer to disk data sectors */
-    block_sector_t indirect;            /* indirect sector containing direct data sectors*/
-    block_sector_t double_indirect;     /* double indirect sector containing indirect_direct sectors*/
-    off_t length;                       /* File size in bytes. */
+In inode.h we have additional members for inode_disk struct inode_disk 
+    block_sector_t direct[NUM_DIRECT];  /* direct pointer to disk data sectors
+    */ block_sector_t indirect;            /* indirect sector containing direct
+    data sectors*/ block_sector_t double_indirect;     /* double indirect sector
+    containing indirect_direct sectors*/ off_t length;                       /*
+    File size in bytes. */
 
 
-#define NUM_DIRECT 123 /* Max number of direct blocks in inode */
-#define PTRS_PER_SECTOR 128 /* Number of pointers per sector */
+#define NUM_DIRECT 123 /* Max number of direct blocks in inode */ #define
+PTRS_PER_SECTOR 128 /* Number of pointers per sector */
 
->> A2: What is the maximum size of a file supported by your inode
->> structure?  Show your work.
-Each inode contains:
- -> uint32_t file_or_dir (4 bytes)
- -> off_t length (4 bytes)
- -> unsigned magic (4 bytes)
- -> block_sector_t direct[NUM_DIRECT] (4 * 123 = 492 bytes)
- -> block_sector_t indirect (4 bytes)
- -> block_sector_t double_indirect (4 bytes)
+>> A2: What is the maximum size of a file supported by your inode >> structure?
+Show your work. Each inode contains: -> uint32_t file_or_dir (4 bytes) -> off_t
+length (4 bytes) -> unsigned magic (4 bytes) -> block_sector_t
+direct[NUM_DIRECT] (4 * 123 = 492 bytes) -> block_sector_t indirect (4 bytes) ->
+block_sector_t double_indirect (4 bytes)
 
 Total of 512 bytes for each inode.
 
 Each indirect block is one full sector, so it has 512 / 4 = 128 block ptrs 
 
-So we have 123 direct blocks,
-128 indirect blocks,
-128 x 128 = 16384 double indirect blocks
+So we have 123 direct blocks, 128 indirect blocks, 128 x 128 = 16384 double
+indirect blocks
 
 Total of 123 + 128 + 16384 = 16635 addressable blocks
 
@@ -71,178 +62,207 @@ So max file sizes is roughly 8mb or exactly 8517120 bytes
 
 ---- SYNCHRONIZATION ----
 
->> A3: Explain how your code avoids a race if two processes attempt to
->> extend a file at the same time.
+>> A3: Explain how your code avoids a race if two processes attempt to >> extend
+a file at the same time.
 
-To prevent a race if two processes attempt to extend a file at the 
-same time, we implemented an inode-level lock (every inode has a 
-lock), 'inode_lock'. 
+To prevent a race if two processes attempt to extend a file at the same time, we
+implemented an inode-level lock (every inode has a lock), 'inode_lock'. 
 
-Extending files occurs in inode_write_at when offset + size 
-exceeds the current file length. If this criteria is met,
-the current thread acquires the lock and any other thread
-trying to extend the file must wait before the current 
-thread releases the lock.
+Extending files occurs in inode_write_at when offset + size exceeds the current
+file length. If this criteria is met, the current thread acquires the lock and
+any other thread trying to extend the file must wait before the current thread
+releases the lock.
 
->> A4: Suppose processes A and B both have file F open, both
->> positioned at end-of-file.  If A reads and B writes F at the same
->> time, A may read all, part, or none of what B writes.  However, A
->> may not read data other than what B writes, e.g. if B writes
->> nonzero data, A is not allowed to see all zeros.  Explain how your
->> code avoids this race.
+>> A4: Suppose processes A and B both have file F open, both >> positioned at
+end-of-file.  If A reads and B writes F at the same >> time, A may read all,
+part, or none of what B writes.  However, A >> may not read data other than what
+B writes, e.g. if B writes >> nonzero data, A is not allowed to see all zeros.
+Explain how your >> code avoids this race.
 
+The file system uses a lock on the inode to prevent this race condition. When
+process B writes to the file, it acquires the inode lock, preventing process A
+from reading until the write is complete. This ensures that A cannot read any
+data other than what B writes. 
 
->> A5: Explain how your synchronization design provides "fairness".
->> File access is "fair" if readers cannot indefinitely block writers
->> or vice versa.  That is, many processes reading from a file cannot
->> prevent forever another process from writing the file, and many
->> processes writing to a file cannot prevent another process forever
->> from reading the file.
+If B needs to grow the file, it allocates the required number of new blocks with
+byte_to_sector. Each new block is immediately filled with zeros (a block-size
+array of zeros is written to the sector). At this point the inode's length has
+not been updated, so A using inode_length will still see the old file size and
+cannot access these new blocks.
+
+B writes its actual data into the newly allocated blocks. The write loop copies
+the user buffer into the appropriate sectors. Because the length is still
+unchanged, A cannot read these blocks.
+
+Only after all data has been written does B update inode->data.length and write
+the modified inode back to disk. This is done while still holding the lock, so A
+cannot read the new length until the write is complete. 
+
+Once the length is committed, the lock is released. Now any subsequent read by A
+will see will see the new length, and because all data blocks are already in
+place, it will read the exact bytes that B wrote.
+
+Therefore, A may read all, part, or none of what B writes, but it cannot read
+any data other than what B writes.
+
+>> A5: Explain how your synchronization design provides "fairness". >> File
+access is "fair" if readers cannot indefinitely block writers >> or vice versa.
+That is, many processes reading from a file cannot >> prevent forever another
+process from writing the file, and many >> processes writing to a file cannot
+prevent another process forever >> from reading the file.
+
+Our synchronization design provides fairness by ensuring that readers and
+writers cannot indefinitely starve each other. When a writer is waiting to
+access a file, new readers are prevented from continuously entering and blocking
+the writer. Similarly, when readers are waiting, writers cannot continuously
+acquire the lock and prevent the readers from accessing the file.
 
 ---- RATIONALE ----
 
->> A6: Is your inode structure a multilevel index?  If so, why did you
->> choose this particular combination of direct, indirect, and doubly
->> indirect blocks?  If not, why did you choose an alternative inode
->> structure, and what advantages and disadvantages does your
->> structure have, compared to a multilevel index?
+>> A6: Is your inode structure a multilevel index?  If so, why did you >> choose
+this particular combination of direct, indirect, and doubly >> indirect blocks?
+If not, why did you choose an alternative inode >> structure, and what
+advantages and disadvantages does your >> structure have, compared to a
+multilevel index?
 
-                SUBDIRECTORIES
-                ==============
+
+Our inode structure is a multilevel index and it uses a combination of direct
+blocks, indirect blocks, and doubly indirect blocks.
+
+We chose this structure because it provides a good balance between performance
+and maximum file size. Direct blocks allow small files to be accessed
+efficiently while indirect blocks allow larger files to be supported without
+making the inode itself too large. Doubly indirect blocks allow us to support
+very large files by adding another level of indexing. Our design also avoids
+wasting space for small files as small files can use the direct block pointers
+without requiring additional index blocks.
+
+                SUBDIRECTORIES ==============
 
 ---- DATA STRUCTURES ----
 
->> B1: Copy here the declaration of each new or changed `struct' or
->> `struct' member, global or static variable, `typedef', or
->> enumeration.  Identify the purpose of each in 25 words or less.
+>> B1: Copy here the declaration of each new or changed `struct' or >> `struct'
+member, global or static variable, `typedef', or >> enumeration.  Identify the
+purpose of each in 25 words or less.
 
-In thread.h for struct thread we have a struct member
-struct dir* cur_dir; /*the current directory the thread/process is in (cwd)*/
+In thread.h for struct thread we have a struct member struct dir* cur_dir; /*the
+current directory the thread/process is in (cwd)*/
 
-In inode.h we have additional members for inode_disk that we added for subdirectories
-struct inode_disk 
+In inode.h we have additional members for inode_disk that we added for
+subdirectories struct inode_disk 
     uint32_t file_or_dir;    /*int that represents if the disk is storing an
                             file or a directory 0 for file 1 for directory*/ 
 
-In inode.c we have an additional list and lock used for tracking open inodes
-/* List of open inodes, so that opening a single inode twice
+In inode.c we have an additional list and lock used for tracking open inodes /*
+List of open inodes, so that opening a single inode twice
    returns the same `struct inode'. */
-static struct list open_inodes; /* List of all open inodes. */
-static struct lock open_inode_lock; /* Lock for open_inodes. */
+static struct list open_inodes; /* List of all open inodes. */ static struct
+lock open_inode_lock; /* Lock for open_inodes. */
 
-In freemap.c, we have an additional lock for the free map
-static struct lock free_map_lock; /* Lock for free map. */
+In freemap.c, we have an additional lock for the free map static struct lock
+free_map_lock; /* Lock for free map. */
 
 
 ---- ALGORITHMS ----
 
->> B2: Describe your code for traversing a user-specified path.  How
->> do traversals of absolute and relative paths differ?
+>> B2: Describe your code for traversing a user-specified path.  How >> do
+traversals of absolute and relative paths differ?
 
-The code for traversing a user-specified path is basically all done
-in a helper function of char * traverse_path (const char *name, struct dir
-**directory). First of all it starts by seperating absolute bs realtive 
-paths. If the path starts with a / then it is an absolute path and as 
-such we start at the root directory. On the otherhand if it doesn't start with
-a / then it is a realtive path and we start with the processes/threads current
-directory which is stored as a paramater in the thread struct. From there
-using the strtok_r method as explained in string.c we can break our path into
-tokens seperated by the / delimiter. This is very convenient as each token 
-would be the next directory we have to go to. Then in a while loop we use 
-strtok_r to continue on the subdirectory path by using dir_lookup on the 
-current subdirectory so we can go to the next subdirectory. We repeat 
-this until we have the final token as the final token in the path 
-would be the possible filename or dirname to create,open or remove 
-(i.e a/b/c/d d can be a filename to create, it is not necessarily a 
-directory). So once we stop at the last token which is a name for a 
-directory or file we return it to do whatever we need. Also when going
-through subdirectories to reach our path destiniation we also note 
-that we implemented the '.' and '..' special names/directory entries.
-'.' representing the current directory while '..' represents the parent 
-directory. Also because we use stringtok_r method unconventional,
-but acceptable paths such as a//b would work as well, behaving the same way
-as a/b.
+The code for traversing a user-specified path is basically all done in a helper
+function of char * traverse_path (const char *name, struct dir **directory).
+First of all it starts by seperating absolute bs realtive paths. If the path
+starts with a / then it is an absolute path and as such we start at the root
+directory. On the otherhand if it doesn't start with a / then it is a realtive
+path and we start with the processes/threads current directory which is stored
+as a paramater in the thread struct. From there using the strtok_r method as
+explained in string.c we can break our path into tokens seperated by the /
+delimiter. This is very convenient as each token would be the next directory we
+have to go to. Then in a while loop we use strtok_r to continue on the
+subdirectory path by using dir_lookup on the current subdirectory so we can go
+to the next subdirectory. We repeat this until we have the final token as the
+final token in the path would be the possible filename or dirname to create,open
+or remove (i.e a/b/c/d d can be a filename to create, it is not necessarily a
+directory). So once we stop at the last token which is a name for a directory or
+file we return it to do whatever we need. Also when going through subdirectories
+to reach our path destiniation we also note that we implemented the '.' and '..'
+special names/directory entries. '.' representing the current directory while
+'..' represents the parent directory. Also because we use stringtok_r method
+unconventional, but acceptable paths such as a//b would work as well, behaving
+the same way as a/b.
 
 ---- SYNCHRONIZATION ----
 
->> B4: How do you prevent races on directory entries?  For example,
->> only one of two simultaneous attempts to remove a single file  
->> should succeed, as should only one of two simultaneous attempts to
->> create a file with the same name, and so on.
+>> B4: How do you prevent races on directory entries?  For example, >> only one
+of two simultaneous attempts to remove a single file  
+>> should succeed, as should only one of two simultaneous attempts to >> create
+a file with the same name, and so on.
 
-Before performing any directory operations, the current thread 
-acquires the directory's inode_lock. This prevents all possible 
-race conditions. For example, when two threads try to create a 
-file with the same name simultaneously, both will call dir_add.
-The first one to acquire the inode_lock scans the directory, 
-finds the name free, inserts the new entry, and releases the 
-lock. The second thread then acquires the lock, sees
-the name already exists, and fails.
+Before performing any directory operations, the current thread acquires the
+directory's inode_lock. This prevents all possible race conditions. For example,
+when two threads try to create a file with the same name simultaneously, both
+will call dir_add. The first one to acquire the inode_lock scans the directory,
+finds the name free, inserts the new entry, and releases the lock. The second
+thread then acquires the lock, sees the name already exists, and fails.
 
->> B5: Does your implementation allow a directory to be removed if it
->> is open by a process or if it is in use as a process's current
->> working directory?  If so, what happens to that process's future
->> file system operations?  If not, how do you prevent it?
+>> B5: Does your implementation allow a directory to be removed if it >> is open
+by a process or if it is in use as a process's current >> working directory?  If
+so, what happens to that process's future >> file system operations?  If not,
+how do you prevent it?
 
-Our implementation does not allow a directory to be removed if it is 
-open by a process or if it is in use as a process's current working 
-directory. 
+Our implementation does not allow a directory to be removed if it is open by a
+process or if it is in use as a process's current working directory. 
 
-Whenever a directory is opened (by dir_open, filesys_open, etc), 
-it's inode's open_cnt field is incremented by 1, and every additional 
-opener increases the count. During removal, the thread first acquires 
-the inode_lock, then checks whether open_cnt == 0 first before removing 
-the directory. If it's != 0, directory is still in use and removal fails 
-with an error.
+Whenever a directory is opened (by dir_open, filesys_open, etc), it's inode's
+open_cnt field is incremented by 1, and every additional opener increases the
+count. During removal, the thread first acquires the inode_lock, then checks
+whether open_cnt == 0 first before removing the directory. If it's != 0,
+directory is still in use and removal fails with an error.
 
 ---- RATIONALE ----
 
->> B6: Explain why you chose to represent the current directory of a
->> process the way you did.
+>> B6: Explain why you chose to represent the current directory of a >> process
+the way you did.
 
-We chose to represent the current directory of a process as a 
-struct dir* cur_dir; in the thread/processes thread struct. We represented it 
-this way so that different processes each have their own seperate current 
-directory. This is because after exec is called and the child process inherits 
-the parents directorythe two processes directories are completely independent.
-So obviously storing the directories as struct dir* was the most logical way 
-to store a processes current directory. It is easy for a process to access 
-(just need to do thread_current() to get thread/process paramters) and the struct 
-dir obviously has everything a process needs as it is the struct designed for 
-dirs. One important thing to mention is that when the child process inherits 
-the parents directory we don't just set the directory as an equivalence 
-with '='. If we did that then both processes would share the same directory 
-no matter what and they wouldn't be independent. So instead the child 
-processes would use the dir_reopen function to get their own independent 
-directory that is still the same directory as the parent (this is in the sense 
-that they have the same directory struct, but the pointers aren't the same 
-so they can change them without affecting one another). Once again because 
-we use a struct dir* and because of the way the struct dir has an 
-inode in it 2 processes can have the same directory info while not 
-being stuck together (can move to different directories).
-
+We chose to represent the current directory of a process as a struct dir*
+cur_dir; in the thread/processes thread struct. We represented it this way so
+that different processes each have their own seperate current directory. This is
+because after exec is called and the child process inherits the parents
+directorythe two processes directories are completely independent. So obviously
+storing the directories as struct dir* was the most logical way to store a
+processes current directory. It is easy for a process to access (just need to do
+thread_current() to get thread/process paramters) and the struct dir obviously
+has everything a process needs as it is the struct designed for dirs. One
+important thing to mention is that when the child process inherits the parents
+directory we don't just set the directory as an equivalence with '='. If we did
+that then both processes would share the same directory no matter what and they
+wouldn't be independent. So instead the child processes would use the dir_reopen
+function to get their own independent directory that is still the same directory
+as the parent (this is in the sense that they have the same directory struct,
+but the pointers aren't the same so they can change them without affecting one
+another). Once again because we use a struct dir* and because of the way the
+struct dir has an inode in it 2 processes can have the same directory info while
+not being stuck together (can move to different directories).
 
 
-               SURVEY QUESTIONS
-               ================
 
-Answering these questions is optional, but it will help us improve the
-course in future quarters.  Feel free to tell us anything you
-want--these questions are just to spur your thoughts.  You may also
-choose to respond anonymously in the course evaluations at the end of
-the quarter.
+               SURVEY QUESTIONS ================
 
->> In your opinion, was this assignment, or any one of the three problems
->> in it, too easy or too hard?  Did it take too long or too little time?
+Answering these questions is optional, but it will help us improve the course in
+future quarters.  Feel free to tell us anything you want--these questions are
+just to spur your thoughts.  You may also choose to respond anonymously in the
+course evaluations at the end of the quarter.
 
->> Did you find that working on a particular part of the assignment gave
->> you greater insight into some aspect of OS design?
+>> In your opinion, was this assignment, or any one of the three problems >> in
+it, too easy or too hard?  Did it take too long or too little time?
 
->> Is there some particular fact or hint we should give students in
->> future quarters to help them solve the problems?  Conversely, did you
->> find any of our guidance to be misleading?
+>> Did you find that working on a particular part of the assignment gave >> you
+greater insight into some aspect of OS design?
 
->> Do you have any suggestions for the TAs to more effectively assist
->> students in future quarters?
+>> Is there some particular fact or hint we should give students in >> future
+quarters to help them solve the problems?  Conversely, did you >> find any of
+our guidance to be misleading?
+
+>> Do you have any suggestions for the TAs to more effectively assist >>
+students in future quarters?
 
 >> Any other comments?
