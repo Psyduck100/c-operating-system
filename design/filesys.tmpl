@@ -33,6 +33,11 @@ In inode.h we have additional members for inode_disk struct inode_disk
     containing indirect_direct sectors*/ off_t length;                       /*
     File size in bytes. */
 
+In inode.h we also have an additional member (a lock) for struct inode
+ struct lock inode_lock;              /*Inode level lock which is used when extending files
+                                      So two processes cannot extend at at the same time*/
+
+
 
 #define NUM_DIRECT 123 /* Max number of direct blocks in inode */ #define
 PTRS_PER_SECTOR 128 /* Number of pointers per sector */
@@ -202,8 +207,9 @@ of two simultaneous attempts to remove a single file
 a file with the same name, and so on.
 
 Before performing any directory operations, the current thread acquires the
-directory's inode_lock. This prevents all possible race conditions. For example,
-when two threads try to create a file with the same name simultaneously, both
+the directory's dir_lock from the directories inode. This prevents all possible 
+race conditions. 
+For example, when two threads try to create a file with the same name simultaneously, both
 will call dir_add. The first one to acquire the inode_lock scans the directory,
 finds the name free, inserts the new entry, and releases the lock. The second
 thread then acquires the lock, sees the name already exists, and fails.
