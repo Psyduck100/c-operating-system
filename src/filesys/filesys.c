@@ -131,6 +131,11 @@ traverse_path (const char *name, struct dir **directory)
   *directory = cur_dir;
 
   char *entry_name = malloc (strlen (token) + 1);
+  if (entry_name ==NULL){
+    *directory = NULL;
+    dir_close (cur_dir);
+    return NULL;
+  }
 
   /*the last token after breaking out of loop is the entry_name*/
   strlcpy (entry_name, token, strlen (token) + 1);

@@ -92,26 +92,33 @@ byte_to_sector (struct inode *inode, off_t pos, bool alloc)
 
 
     // need to access indirect block's blocks memory address somehow
-    struct indirect_block ib;
-    block_read (fs_device, on_disk_inode->indirect, &ib);
+    struct indirect_block *ib = malloc(sizeof(struct indirect_block));
+    if (ib ==NULL){
+      return NOT_ALLOCATED;
+    }
+    block_read (fs_device, on_disk_inode->indirect, ib);
     
-    block_sector_t s = ib.sectors[sector_index];
+    block_sector_t s = ib->sectors[sector_index];
 
     if (s == 0){
       if (!alloc){
+        free(ib);
         return NOT_ALLOCATED;
       }
       block_sector_t allocated_sector;
       if (!free_map_allocate(1, &allocated_sector)){
+        free(ib);
         return NOT_ALLOCATED;
       }
       block_write(fs_device, allocated_sector, zeros);
-      ib.sectors[sector_index] = allocated_sector;
-      block_write(fs_device, on_disk_inode->indirect, &ib);
+      ib->sectors[sector_index] = allocated_sector;
+      block_write(fs_device, on_disk_inode->indirect, ib);
       
       
     }
-    return ib.sectors[sector_index];
+    block_sector_t to_return= ib->sectors[sector_index];
+    free(ib);
+    return to_return;
   }
 
   /*CASE 3*/
@@ -144,24 +151,29 @@ byte_to_sector (struct inode *inode, off_t pos, bool alloc)
 
 
   /*find the address of the indirect block within the doubly*/
-  struct indirect_block d_ib;
-  block_read(fs_device, on_disk_inode->double_indirect, &d_ib); 
-  block_sector_t ib_sector_addr = d_ib.sectors[ib_index];
+  struct indirect_block *d_ib = malloc(sizeof (struct indirect_block));
+  if (d_ib == NULL){
+    return NOT_ALLOCATED;
+  }
+  block_read(fs_device, on_disk_inode->double_indirect, d_ib); 
+  block_sector_t ib_sector_addr = d_ib->sectors[ib_index];
 
   /*if indirect block ptr within the doubly indirect block is zero
   attempt an alloc*/
   if (ib_sector_addr == 0){
 
     if (!alloc){
+      free(d_ib);
       return NOT_ALLOCATED;
     }
-    if (!free_map_allocate(1, &d_ib.sectors[ib_index])){
+    if (!free_map_allocate(1, &d_ib->sectors[ib_index])){
+      free(d_ib);
       return NOT_ALLOCATED;
     }
     /*zero out the indirect block's sector*/
-    block_write(fs_device, d_ib.sectors[ib_index], zeros);
+    block_write(fs_device, d_ib->sectors[ib_index], zeros);
 
-    block_write(fs_device, on_disk_inode->double_indirect, &d_ib);
+    block_write(fs_device, on_disk_inode->double_indirect, d_ib);
 
 
 
@@ -172,29 +184,41 @@ byte_to_sector (struct inode *inode, off_t pos, bool alloc)
 
 
   /*find the address of the direct block within the indirect*/
-  struct indirect_block ib; 
-  block_read(fs_device, d_ib.sectors[ib_index], &ib);
-  block_sector_t direct_sector_addr = ib.sectors[direct_index];
+  struct indirect_block *ib = malloc(sizeof(struct indirect_block));
+  if(ib == NULL){
+    free(d_ib);
+    return NOT_ALLOCATED;
+  }
+  block_read(fs_device, d_ib->sectors[ib_index], ib);
+  block_sector_t direct_sector_addr = ib->sectors[direct_index];
 
   /*once again, if direct block ptr within the indirect is zero
   we attempt to allocate a block for it*/
   if (direct_sector_addr == 0){
     if(!alloc){
+      free(ib);
+      free(d_ib);
       return NOT_ALLOCATED;
     }
     block_sector_t new_sector;
     if (!free_map_allocate(1, &new_sector)){
+      free(ib);
+      free(d_ib);
       return NOT_ALLOCATED;
     }
     block_write(fs_device, new_sector, zeros);
-    ib.sectors[direct_index] = new_sector;
+    ib->sectors[direct_index] = new_sector;
     /*here we complete it by writing the indirect block sector
     to the doubly indirect's sector*/
-    block_write(fs_device, d_ib.sectors[ib_index], &ib);
+    block_write(fs_device, d_ib->sectors[ib_index], ib);
   }
 
+  block_sector_t to_return = ib->sectors[direct_index];
+  free(ib);
+  free(d_ib);
 
-  return ib.sectors[direct_index];
+
+  return to_return;
 }
 
 /* List of open inodes, so that opening a single inode twice
@@ -386,6 +410,9 @@ inode_close (struct inode *inode)
 
           
         }
+      else {
+        block_write(fs_device, inode->sector, &inode->data);
+      }
 
       free (inode); 
     }
