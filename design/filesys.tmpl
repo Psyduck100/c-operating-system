@@ -118,11 +118,11 @@ That is, many processes reading from a file cannot >> prevent forever another
 process from writing the file, and many >> processes writing to a file cannot
 prevent another process forever >> from reading the file.
 
-Our synchronization design provides fairness by ensuring that readers and
-writers cannot indefinitely starve each other. When a writer is waiting to
-access a file, new readers are prevented from continuously entering and blocking
-the writer. Similarly, when readers are waiting, writers cannot continuously
-acquire the lock and prevent the readers from accessing the file.
+Our synchronization design provides fairness by ensuring readers and writers 
+never block each other at all. both inode read at and write at do ops on file
+data without aquiring any lock and all so there can be multiple processes that
+read and write to the file simultaneously given that there is no file 
+extension happening.
 
 ---- RATIONALE ----
 
@@ -137,12 +137,14 @@ Our inode structure is a multilevel index and it uses a combination of direct
 blocks, indirect blocks, and doubly indirect blocks.
 
 We chose this structure because it provides a good balance between performance
-and maximum file size. Direct blocks allow small files to be accessed
+and making the most out out of the 512 bytes for the disk inode struct.
+Direct blocks allow small files to be accessed
 efficiently while indirect blocks allow larger files to be supported without
 making the inode itself too large. Doubly indirect blocks allow us to support
 very large files by adding another level of indexing. Our design also avoids
 wasting space for small files as small files can use the direct block pointers
-without requiring additional index blocks.
+without requiring additional index blocks. Doubly indirect pointers also allow
+us to satisfy the 8MB requirement.
 
                 SUBDIRECTORIES ==============
 
