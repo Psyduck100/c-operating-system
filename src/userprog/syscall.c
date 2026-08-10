@@ -300,7 +300,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       break;
       
     case SYS_READDIR:
-      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args);
+      success = copy_in (args, (uint32_t *)f->esp + 1, sizeof *args * 2);
       if (!success)
         exit (-1);
       if (!check_pointer ((uint8_t *)args[1]))
